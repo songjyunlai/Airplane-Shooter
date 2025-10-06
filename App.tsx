@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect } from 'react';
 import Game from './components/Game';
 import MainMenu from './components/MainMenu';
@@ -7,20 +8,20 @@ import ShopScreen from './components/ShopScreen';
 import SupplyDropScreen from './components/SupplyDropScreen';
 import LevelSelectionScreen from './components/LevelSelectionScreen';
 import PauseMenu from './components/PauseMenu';
-import { GameState, Plane, BombType, GunType, PowerUp } from './types';
-import { PLANES, BOMBS, GUNS, POWER_UPS, LOOT_POOL, SUPPLY_DROP_COST, DUPLICATE_CURRENCY_AWARD, getXpForNextLevel } from './constants';
+import { GameState, Boat, BombType, GunType, PowerUp } from './types';
+import { BOATS, BOMBS, GUNS, POWER_UPS, LOOT_POOL, SUPPLY_DROP_COST, DUPLICATE_CURRENCY_AWARD, getXpForNextLevel } from './constants';
 
-const SAVE_KEY = 'airplaneShooterSaveData';
+const SAVE_KEY = 'underwaterWarSaveData';
 
 interface PlayerData {
   playerLevel: number;
   playerXp: number;
   currency: number;
-  ownedPlanes: Set<string>;
+  ownedBoats: Set<string>;
   ownedBombs: Set<string>;
   ownedGuns: Set<string>;
   ownedPowerUps: { [key: string]: number };
-  equippedPlaneId: string;
+  equippedBoatId: string;
   equippedBombId: string;
   equippedGunId: string | null;
   equippedPowerUpId: string | null;
@@ -30,11 +31,11 @@ const defaultPlayerData: PlayerData = {
   playerLevel: 1,
   playerXp: 0,
   currency: 500,
-  ownedPlanes: new Set(['p1']),
+  ownedBoats: new Set(['p1']),
   ownedBombs: new Set(['b1']),
   ownedGuns: new Set(),
   ownedPowerUps: { 'pw1': 3 },
-  equippedPlaneId: 'p1',
+  equippedBoatId: 'p1',
   equippedBombId: 'b1',
   equippedGunId: null,
   equippedPowerUpId: 'pw1',
@@ -49,7 +50,7 @@ const loadGameData = (): PlayerData => {
       return {
         ...defaultPlayerData,
         ...parsed,
-        ownedPlanes: new Set(parsed.ownedPlanes || ['p1']),
+        ownedBoats: new Set(parsed.ownedBoats || ['p1']),
         ownedBombs: new Set(parsed.ownedBombs || ['b1']),
         ownedGuns: new Set(parsed.ownedGuns || []),
       };
@@ -78,7 +79,7 @@ const App: React.FC = () => {
       const dataToSave = {
         ...playerData,
         // Convert Sets to arrays for JSON serialization
-        ownedPlanes: Array.from(playerData.ownedPlanes),
+        ownedBoats: Array.from(playerData.ownedBoats),
         ownedBombs: Array.from(playerData.ownedBombs),
         ownedGuns: Array.from(playerData.ownedGuns),
       };
@@ -170,16 +171,16 @@ const App: React.FC = () => {
     }
   }, [gameState]);
 
-  const handleBuyItem = useCallback((itemId: string, itemType: 'plane' | 'bomb' | 'gun' | 'powerup', cost: number) => {
+  const handleBuyItem = useCallback((itemId: string, itemType: 'boat' | 'bomb' | 'gun' | 'powerup', cost: number) => {
     setPlayerData(prev => {
         if (prev.currency < cost) return prev;
 
-        const newPlanes = new Set(prev.ownedPlanes);
+        const newBoats = new Set(prev.ownedBoats);
         const newBombs = new Set(prev.ownedBombs);
         const newGuns = new Set(prev.ownedGuns);
         const newPowerUps = { ...prev.ownedPowerUps };
 
-        if (itemType === 'plane') newPlanes.add(itemId);
+        if (itemType === 'boat') newBoats.add(itemId);
         else if (itemType === 'bomb') newBombs.add(itemId);
         else if (itemType === 'gun') newGuns.add(itemId);
         else if (itemType === 'powerup') newPowerUps[itemId] = (newPowerUps[itemId] || 0) + 1;
@@ -187,7 +188,7 @@ const App: React.FC = () => {
         return {
             ...prev,
             currency: prev.currency - cost,
-            ownedPlanes: newPlanes,
+            ownedBoats: newBoats,
             ownedBombs: newBombs,
             ownedGuns: newGuns,
             ownedPowerUps: newPowerUps,
@@ -195,7 +196,7 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleOpenSupplyDrop = useCallback((): { item: Plane | BombType | GunType | PowerUp, isDuplicate: boolean } => {
+  const handleOpenSupplyDrop = useCallback((): { item: Boat | BombType | GunType | PowerUp, isDuplicate: boolean } => {
     const totalWeight = LOOT_POOL.reduce((sum, item) => sum + item.weight, 0);
     let random = Math.random() * totalWeight;
     
@@ -208,27 +209,27 @@ const App: React.FC = () => {
         }
     }
     
-    const allItems = [...PLANES, ...BOMBS, ...GUNS, ...POWER_UPS];
+    const allItems = [...BOATS, ...BOMBS, ...GUNS, ...POWER_UPS];
     const wonItem = allItems.find(i => i.id === wonItemId)!;
 
     let isDuplicate = false;
-    let itemType: 'plane' | 'bomb' | 'gun' | 'powerup';
+    let itemType: 'boat' | 'bomb' | 'gun' | 'powerup';
 
     if ('maxAmmo' in wonItem) itemType = 'gun';
     else if ('damage' in wonItem) itemType = 'bomb';
     else if ('quantityPerDrop' in wonItem) itemType = 'powerup';
-    else itemType = 'plane';
+    else itemType = 'boat';
 
     setPlayerData(prev => {
-        const newPlanes = new Set(prev.ownedPlanes);
+        const newBoats = new Set(prev.ownedBoats);
         const newBombs = new Set(prev.ownedBombs);
         const newGuns = new Set(prev.ownedGuns);
         const newPowerUps = { ...prev.ownedPowerUps };
         let newCurrency = prev.currency - SUPPLY_DROP_COST;
 
-        if (itemType === 'plane') {
-            isDuplicate = newPlanes.has(wonItem.id);
-            newPlanes.add(wonItem.id);
+        if (itemType === 'boat') {
+            isDuplicate = newBoats.has(wonItem.id);
+            newBoats.add(wonItem.id);
         } else if (itemType === 'bomb') {
             isDuplicate = newBombs.has(wonItem.id);
             newBombs.add(wonItem.id);
@@ -248,7 +249,7 @@ const App: React.FC = () => {
         return {
             ...prev,
             currency: newCurrency,
-            ownedPlanes: newPlanes,
+            ownedBoats: newBoats,
             ownedBombs: newBombs,
             ownedGuns: newGuns,
             ownedPowerUps: newPowerUps,
@@ -284,7 +285,7 @@ const App: React.FC = () => {
               onGameOver={(scores, xp, count, currency) => handleGameEnd(scores, false, xp, count, currency)} 
               onGameWon={(scores, xp, count, currency) => handleGameEnd(scores, true, xp, count, currency)}
               onPause={pauseGame}
-              equippedPlaneId={playerData.equippedPlaneId}
+              equippedBoatId={playerData.equippedBoatId}
               equippedBombId={playerData.equippedBombId}
               equippedGunId={playerData.equippedGunId}
               equippedPowerUpId={playerData.equippedPowerUpId}
@@ -320,16 +321,16 @@ const App: React.FC = () => {
         return (
           <ShopScreen 
             currency={playerData.currency}
-            ownedPlanes={playerData.ownedPlanes}
+            ownedBoats={playerData.ownedBoats}
             ownedBombs={playerData.ownedBombs}
             ownedGuns={playerData.ownedGuns}
             ownedPowerUps={playerData.ownedPowerUps}
-            equippedPlaneId={playerData.equippedPlaneId}
+            equippedBoatId={playerData.equippedBoatId}
             equippedBombId={playerData.equippedBombId}
             equippedGunId={playerData.equippedGunId}
             equippedPowerUpId={playerData.equippedPowerUpId}
             onBuyItem={handleBuyItem}
-            onEquipPlane={(id) => setPlayerData(p => ({ ...p, equippedPlaneId: id }))}
+            onEquipBoat={(id) => setPlayerData(p => ({ ...p, equippedBoatId: id }))}
             onEquipBomb={(id) => setPlayerData(p => ({ ...p, equippedBombId: id }))}
             onEquipGun={(id) => setPlayerData(p => ({ ...p, equippedGunId: id }))}
             onEquipPowerUp={(id) => setPlayerData(p => ({ ...p, equippedPowerUpId: id }))}
@@ -363,9 +364,9 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen w-full text-white font-mono p-2 sm:p-4">
       <h1 className="text-3xl sm:text-4xl md:text-6xl font-bold mb-2 text-cyan-400 tracking-widest text-center" style={{ textShadow: '0 0 10px #0ff, 0 0 20px #0ff' }}>
-        AIRPLANE SHOOTER
+        UNDERWATER WAR
       </h1>
-      <p className="text-gray-200 mb-6 text-center text-sm sm:text-base">Test your luck or save up for guaranteed power!</p>
+      <p className="text-gray-200 mb-6 text-center text-sm sm:text-base">Engage in naval combat against quirky underwater enemies!</p>
       {renderContent()}
     </div>
   );

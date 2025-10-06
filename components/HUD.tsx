@@ -6,7 +6,6 @@ interface HUDProps {
   score: number;
   score2?: number;
   isMultiplayer?: boolean;
-  lives: number;
   level: number;
   currency: number;
   boss: Boss | null;
@@ -19,6 +18,10 @@ interface HUDProps {
   playerLevel: number;
   xp: number;
   xpForNextLevel: number;
+  p1Hp: number;
+  p1MaxHp: number;
+  p2Hp?: number;
+  p2MaxHp?: number;
   equippedPowerUpId: string | null;
   powerUpCount: number;
   isInvincible: boolean;
@@ -48,7 +51,26 @@ const WeaponDisplay: React.FC<{
     );
 };
 
-const HUD: React.FC<HUDProps> = ({ score, score2, isMultiplayer, lives, level, currency, boss, onPause, p1Weapon, p1Ammo, p2Weapon, p2Ammo, equippedGun, playerLevel, xp, xpForNextLevel, equippedPowerUpId, powerUpCount, isInvincible, rapidFireTimeLeft, timeSlowTimeLeft, goldRushTimeLeft }) => {
+const HealthBar: React.FC<{ hp: number, maxHp: number, isP1: boolean }> = ({ hp, maxHp, isP1 }) => {
+    const hpPercentage = maxHp > 0 ? (hp / maxHp) * 100 : 0;
+    const color = isP1 ? 'cyan' : 'green';
+
+    return (
+        <div className="flex items-center gap-2">
+            <span className={`font-bold text-${color}-400`}>{isP1 ? "P1 HP:" : "P2 HP:"}</span>
+            <div className="w-32 bg-gray-600 rounded-full h-5 border-2 border-red-800">
+                <div
+                    className="bg-red-500 h-full rounded-full text-center text-xs text-white font-bold flex items-center justify-center transition-all duration-300"
+                    style={{ width: `${hpPercentage}%` }}
+                >
+                   {Math.ceil(hp)} / {maxHp}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+const HUD: React.FC<HUDProps> = ({ score, score2, isMultiplayer, level, currency, boss, onPause, p1Weapon, p1Ammo, p2Weapon, p2Ammo, equippedGun, playerLevel, xp, xpForNextLevel, p1Hp, p1MaxHp, p2Hp, p2MaxHp, equippedPowerUpId, powerUpCount, isInvincible, rapidFireTimeLeft, timeSlowTimeLeft, goldRushTimeLeft }) => {
   const bossHealthPercentage = boss ? (boss.health / boss.maxHealth) * 100 : 0;
   const xpPercentage = xpForNextLevel > 0 ? (xp / xpForNextLevel) * 100 : 0;
   const equippedPowerUp = equippedPowerUpId ? POWER_UPS.find(p => p.id === equippedPowerUpId) : null;
@@ -97,10 +119,13 @@ const HUD: React.FC<HUDProps> = ({ score, score2, isMultiplayer, lives, level, c
             <div>
             <span className="font-bold text-cyan-400">LVL:</span> {level}
             </div>
-            <div className="flex items-center">
-            <span className="font-bold text-red-500 mr-2">HP:</span>
-            {'❤️'.repeat(lives)}
-            </div>
+            {isMultiplayer && p2Hp !== undefined && p2MaxHp !== undefined ? (
+                 <div className="flex flex-col items-end gap-1">
+                     <HealthBar hp={p1Hp} maxHp={p1MaxHp} isP1={true} />
+                     <HealthBar hp={p2Hp} maxHp={p2MaxHp} isP1={false} />
+                 </div>
+            ) : ( <HealthBar hp={p1Hp} maxHp={p1MaxHp} isP1={true} /> )
+            }
             <button onClick={onPause} className="text-3xl hover:opacity-75" aria-label="Pause Game">
                 ⏸️
             </button>

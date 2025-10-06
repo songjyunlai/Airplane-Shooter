@@ -1,19 +1,20 @@
+
 import React from 'react';
-import { PLANES, BOMBS, GUNS, POWER_UPS, RARITY_COLORS } from '../constants';
-import { Plane, BombType, GunType, PowerUp } from '../types';
+import { BOATS, BOMBS, GUNS, POWER_UPS, RARITY_COLORS } from '../constants';
+import { Boat, BombType, GunType, PowerUp } from '../types';
 
 interface ShopScreenProps {
   currency: number;
-  ownedPlanes: Set<string>;
+  ownedBoats: Set<string>;
   ownedBombs: Set<string>;
   ownedGuns: Set<string>;
   ownedPowerUps: { [key: string]: number };
-  equippedPlaneId: string;
+  equippedBoatId: string;
   equippedBombId: string;
   equippedGunId: string | null;
   equippedPowerUpId: string | null;
-  onBuyItem: (itemId: string, itemType: 'plane' | 'bomb' | 'gun' | 'powerup', cost: number) => void;
-  onEquipPlane: (planeId: string) => void;
+  onBuyItem: (itemId: string, itemType: 'boat' | 'bomb' | 'gun' | 'powerup', cost: number) => void;
+  onEquipBoat: (boatId: string) => void;
   onEquipBomb: (bombId: string) => void;
   onEquipGun: (gunId: string | null) => void;
   onEquipPowerUp: (powerUpId: string | null) => void;
@@ -21,7 +22,7 @@ interface ShopScreenProps {
 }
 
 const ShopItemCard: React.FC<{
-    item: Plane | BombType | GunType,
+    item: Boat | BombType | GunType,
     isOwned: boolean,
     isEquipped: boolean,
     canAfford: boolean,
@@ -106,22 +107,22 @@ const PowerUpItemCard: React.FC<{
 
 const ShopScreen: React.FC<ShopScreenProps> = ({
   currency,
-  ownedPlanes,
+  ownedBoats,
   ownedBombs,
   ownedGuns,
   ownedPowerUps,
-  equippedPlaneId,
+  equippedBoatId,
   equippedBombId,
   equippedGunId,
   equippedPowerUpId,
   onBuyItem,
-  onEquipPlane,
+  onEquipBoat,
   onEquipBomb,
   onEquipGun,
   onEquipPowerUp,
   onBack,
 }) => {
-  const visiblePlanes = PLANES.filter(p => !p.findInSupplyDropOnly || ownedPlanes.has(p.id));
+  const visibleBoats = BOATS.filter(p => !p.findInSupplyDropOnly || ownedBoats.has(p.id));
   const visibleBombs = BOMBS.filter(b => !b.findInSupplyDropOnly || ownedBombs.has(b.id));
   const visibleGuns = GUNS.filter(g => !g.findInSupplyDropOnly || ownedGuns.has(g.id));
 
@@ -134,19 +135,19 @@ const ShopScreen: React.FC<ShopScreenProps> = ({
             </div>
         </div>
 
-        {/* Planes Section */}
+        {/* Boats Section */}
         <div className="mb-8">
-            <h3 className="text-2xl font-bold text-cyan-400 mb-4 border-b-2 border-cyan-400/50 pb-2">Planes</h3>
+            <h3 className="text-2xl font-bold text-cyan-400 mb-4 border-b-2 border-cyan-400/50 pb-2">Boats</h3>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {visiblePlanes.map(plane => (
+                {visibleBoats.map(boat => (
                     <ShopItemCard 
-                        key={plane.id}
-                        item={plane}
-                        isOwned={ownedPlanes.has(plane.id)}
-                        isEquipped={equippedPlaneId === plane.id}
-                        canAfford={currency >= (plane.cost || 0)}
-                        onBuy={() => onBuyItem(plane.id, 'plane', plane.cost!)}
-                        onEquip={() => onEquipPlane(plane.id)}
+                        key={boat.id}
+                        item={boat}
+                        isOwned={ownedBoats.has(boat.id)}
+                        isEquipped={equippedBoatId === boat.id}
+                        canAfford={currency >= (boat.cost || 0)}
+                        onBuy={() => onBuyItem(boat.id, 'boat', boat.cost!)}
+                        onEquip={() => onEquipBoat(boat.id)}
                     />
                 ))}
             </div>

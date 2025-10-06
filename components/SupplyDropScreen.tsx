@@ -1,16 +1,17 @@
+
 import React, { useState, useCallback } from 'react';
-import { Plane, BombType, GunType } from '../types';
+import { Boat, BombType, GunType } from '../types';
 import { SUPPLY_DROP_COST, RARITY_COLORS, DUPLICATE_CURRENCY_AWARD } from '../constants';
 
 interface SupplyDropScreenProps {
   currency: number;
-  onOpenSupplyDrop: () => { item: Plane | BombType | GunType, isDuplicate: boolean };
+  onOpenSupplyDrop: () => { item: Boat | BombType | GunType, isDuplicate: boolean };
   onBack: () => void;
 }
 
 const SupplyDropScreen: React.FC<SupplyDropScreenProps> = ({ currency, onOpenSupplyDrop, onBack }) => {
     const [isOpening, setIsOpening] = useState(false);
-    const [wonItem, setWonItem] = useState<{ item: Plane | BombType | GunType, isDuplicate: boolean } | null>(null);
+    const [wonItem, setWonItem] = useState<{ item: Boat | BombType | GunType, isDuplicate: boolean } | null>(null);
 
     const handleOpen = useCallback(() => {
         if (currency < SUPPLY_DROP_COST || isOpening) return;

@@ -14,7 +14,7 @@ export enum GameState {
 
 export type Rarity = 'Common' | 'Rare' | 'Epic' | 'Legendary';
 
-export interface Plane {
+export interface Boat {
   id: string;
   name: string;
   emoji: string;
@@ -22,6 +22,8 @@ export interface Plane {
   rarity: Rarity;
   description: string;
   findInSupplyDropOnly?: boolean;
+  hpMultiplier: number;
+  damageReduction?: number;
 }
 
 // Base type for all weapons
@@ -114,6 +116,16 @@ export interface AmmoDrop {
   emoji: string;
 }
 
+export interface CurrencyDrop {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  amount: number;
+  emoji: string;
+}
+
 
 export interface Enemy {
   id: string;
@@ -173,4 +185,14 @@ export interface Explosion {
 export interface Position {
     x: number;
     y: number;
+}
+
+export interface QTEDodgeState {
+  isActive: boolean;
+  startTime: number;
+  sequence: string[];
+  currentIndex: number;
+  playerId: number;
+  triggeringEntityId: string;
+  entityType: 'enemy' | 'projectile';
 }

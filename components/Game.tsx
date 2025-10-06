@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Player, Bomb, Enemy, Boss, BossProjectile, Explosion, Position, WeaponSelection, Bullet, AmmoDrop, Drone } from '../types';
+import { Player, Bomb, Enemy, Boss, BossProjectile, Explosion, Position, WeaponSelection, Bullet, AmmoDrop, Drone, QTEDodgeState, CurrencyDrop } from '../types';
 import {
   GAME_WIDTH,
   GAME_HEIGHT,
   PLAYER_WIDTH,
   PLAYER_HEIGHT,
   PLAYER_SPEED,
-  PLAYER_LIVES,
+  PLAYER_BASE_HP,
+  HIT_DAMAGE,
   DRONE_WIDTH,
   DRONE_HEIGHT,
   BOMB_WIDTH,
@@ -31,7 +32,7 @@ import {
   BOSS_PROJECTILE_SPEED,
   BOSS_POWER_UP_COOLDOWN,
   BOSS_POWER_UP_DURATIONS,
-  PLANES,
+  BOATS,
   BOMBS,
   GUNS,
   POWER_UPS,
@@ -41,6 +42,8 @@ import {
   AMMO_DROP_BASE_AMOUNT,
   AMMO_DROP_WIDTH,
   AMMO_DROP_HEIGHT,
+  CURRENCY_DROP_WIDTH,
+  CURRENCY_DROP_HEIGHT,
   ENEMY_XP_DROP,
   BOSS_XP_DROP_BASE,
   DAMAGE_BONUS_PER_LEVEL,
@@ -48,13 +51,18 @@ import {
   RAPID_FIRE_DURATION,
   TIME_SLOW_DURATION,
   GOLD_RUSH_DURATION,
-  AUTO_DODGE_COOLDOWN,
-  AUTO_DODGE_DISTANCE,
-  AUTO_DODGE_DANGER_RADIUS,
+  QTE_DODGE_DANGER_RADIUS,
+  QTE_DODGE_COOLDOWN,
+  QTE_DODGE_SLOW_MO_DURATION,
+  QTE_DODGE_SLOW_MO_FACTOR,
+  QTE_DODGE_SEQUENCE_LENGTH,
+  QTE_DODGE_DISTANCE,
   AEGIS_LASER_COOLDOWN,
   AEGIS_LASER_DAMAGE,
   AEGIS_RETALIATION_PULSE_RADIUS,
   AEGIS_CURRENCY_BONUS,
+  BATTLESHIP_SIDE_CANNON_COOLDOWN,
+  BLACK_HOLE_DIRECT_DAMAGE_MODIFIER,
 } from '../constants';
 import HUD from './HUD';
 import { generateInsult } from '../services/geminiService';
@@ -66,7 +74,7 @@ interface GameProps {
   isMultiplayer: boolean;
   onGameOver: (scores: { p1: number, p2?: number }, xpEarned: number, finalPowerUpCount: number, currencyEarned: number) => void;
   onGameWon: (scores: { p1: number, p2?: number }, xpEarned: number, finalPowerUpCount: number, currencyEarned: number) => void;
-  equippedPlaneId: string;
+  equippedBoatId: string;
   equippedBombId: string;
   equippedGunId: string | null;
   isPaused: boolean;
@@ -86,13 +94,13 @@ const BOSS_PROJECTILE_MAP: { [key: string]: string } = {
   '🏺': '💨', '🪐': '💫', '🦾': '🔩', '🐺': '🦷', '🧊': '❄️', 
   '🌋': '🟠', '🌌': '✨', '👼': '🕊️', '⁉️': '❓', '⚫️': ' ',
 };
-const PLAYER_2_EMOJI = '🚁';
+const PLAYER_2_EMOJI = '🛶';
 const EXPLOSION_DURATION = 400;
 
 const ALL_BOSS_TYPES_FOR_RANDOM = LEVEL_CONFIGS.map(l => l.boss.type).slice(0, 28); // All bosses except ? and black hole
 
-const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGameWon, equippedPlaneId, equippedBombId, equippedGunId, isPaused, onPause, playerLevel, playerXp, xpForNextLevel, equippedPowerUpId, ownedPowerUps }) => {
-  const equippedPlane = PLANES.find(p => p.id === equippedPlaneId)!;
+const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGameWon, equippedBoatId, equippedBombId, equippedGunId, isPaused, onPause, playerLevel, playerXp, xpForNextLevel, equippedPowerUpId, ownedPowerUps }) => {
+  const equippedBoat = BOATS.find(p => p.id === equippedBoatId)!;
   const equippedBomb = BOMBS.find(b => b.id === equippedBombId)!;
   const equippedGun = equippedGunId ? GUNS.find(g => g.id === equippedGunId) : null;
 
@@ -112,6 +120,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const bombsRef = useRef<Bomb[]>([]);
   const bulletsRef = useRef<Bullet[]>([]);
   const ammoDropsRef = useRef<AmmoDrop[]>([]);
+  const currencyDropsRef = useRef<CurrencyDrop[]>([]);
   const enemiesRef = useRef<Enemy[]>([]);
   const bossProjectilesRef = useRef<BossProjectile[]>([]);
   const explosionsRef = useRef<Explosion[]>([]);
@@ -124,12 +133,19 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const [score2, setScore2] = useState(0);
   const [currentRunCurrency, setCurrentRunCurrency] = useState(0);
   const [currentRunXp, setCurrentRunXp] = useState(0);
-  const [lives, setLives] = useState(PLAYER_LIVES);
+  
+  // New Health System State
+  const [player1Hp, setPlayer1Hp] = useState(100);
+  const [player1MaxHp, setPlayer1MaxHp] = useState(100);
+  const [isPlayer1Dead, setIsPlayer1Dead] = useState(false);
+  const [player2Hp, setPlayer2Hp] = useState(100);
+  const [player2MaxHp, setPlayer2MaxHp] = useState(100);
+  const [isPlayer2Dead, setIsPlayer2Dead] = useState(false);
+
   const [boss, setBoss] = useState<Boss | null>(null);
   const [isBossActive, setIsBossActive] = useState(false);
   const [bossInsult, setBossInsult] = useState('');
   const [isLoadingInsult, setIsLoadingInsult] = useState(false);
-  const [isRestarting, setIsRestarting] = useState(false);
   const [isPlayer1Stunned, setIsPlayer1Stunned] = useState(false);
   const [isPlayer2Stunned, setIsPlayer2Stunned] = useState(false);
   const [p1Weapon, setP1Weapon] = useState<WeaponSelection>('bomb');
@@ -145,6 +161,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const [timeSlowEndTime, setTimeSlowEndTime] = useState(0);
   const [isGoldRush, setIsGoldRush] = useState(false);
   const [goldRushEndTime, setGoldRushEndTime] = useState(0);
+  const [qteDodgeState, setQteDodgeState] = useState<QTEDodgeState | null>(null);
 
   // Player Debuffs
   const [isPlayer1Slowed, setIsPlayer1Slowed] = useState(false);
@@ -164,12 +181,14 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const keysPressed = useRef<Set<string>>(new Set());
   const lastFireTimeP1 = useRef(0);
   const lastFireTimeP2 = useRef(0);
+  const lastSideCannonTimeP1 = useRef(0);
+  const lastSideCannonTimeP2 = useRef(0);
   const lastAegisLaserTimeP1 = useRef(0);
   const lastAegisLaserTimeP2 = useRef(0);
   const lastBossShotTime = useRef(0);
   const lastBossPowerUpTime = useRef(0);
-  const lastAutoDodgeTimeP1 = useRef(0);
-  const lastAutoDodgeTimeP2 = useRef(0);
+  const lastQteTriggerTimeP1 = useRef(0);
+  const lastQteTriggerTimeP2 = useRef(0);
   const gameLoopRef = useRef<number | null>(null);
   const bossDirection = useRef(1);
   const bossTargetRef = useRef<{ x: number, y: number } | null>(null);
@@ -194,6 +213,48 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     if (equippedPowerUpId) setPowerUpCount(ownedPowerUps[equippedPowerUpId] || 0);
   }, [equippedPowerUpId, ownedPowerUps]);
 
+  // Initialize player health based on equipped boat
+  useEffect(() => {
+    const boat = BOATS.find(p => p.id === equippedBoatId)!;
+    const maxHp = PLAYER_BASE_HP * boat.hpMultiplier;
+    setPlayer1MaxHp(maxHp);
+    setPlayer1Hp(maxHp);
+    setIsPlayer1Dead(false);
+
+    if (isMultiplayer) {
+        setPlayer2MaxHp(maxHp);
+        setPlayer2Hp(maxHp);
+        setIsPlayer2Dead(false);
+    }
+  }, [equippedBoatId, isMultiplayer, startLevel]); // Rerun on startLevel change to reset for new game
+
+  // Game Over logic
+  useEffect(() => {
+      if (player1Hp <= 0 && !isPlayer1Dead) {
+          setIsPlayer1Dead(true);
+          explosionsRef.current.push({ id: `player1-death`, x: player1Ref.current.x, y: player1Ref.current.y, startTime: Date.now(), emoji: '☠️' });
+          player1Ref.current.x = -2000; // Move offscreen
+      }
+      if (isMultiplayer && player2Hp <= 0 && !isPlayer2Dead) {
+          setIsPlayer2Dead(true);
+          explosionsRef.current.push({ id: `player2-death`, x: player2Ref.current.x!, y: player2Ref.current.y!, startTime: Date.now(), emoji: '☠️' });
+          if(player2Ref.current) player2Ref.current.x = -2000;
+      }
+  }, [player1Hp, isPlayer1Dead, player2Hp, isPlayer2Dead, isMultiplayer]);
+
+  useEffect(() => {
+    const p1IsOutOfGame = isPlayer1Dead;
+    const p2IsOutOfGame = isMultiplayer ? isPlayer2Dead : true;
+
+    if (p1IsOutOfGame && p2IsOutOfGame && gameLoopRef.current) {
+        if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
+        gameLoopRef.current = null;
+        setTimeout(() => { // Delay to show final explosion
+             onGameOver({ p1: score1, p2: isMultiplayer ? score2 : undefined }, currentRunXp, powerUpCount, currentRunCurrency);
+        }, 1000);
+    }
+  }, [isPlayer1Dead, isPlayer2Dead, isMultiplayer, onGameOver, score1, score2, currentRunXp, powerUpCount, currentRunCurrency]);
+
   const levelConfig = LEVEL_CONFIGS[level - 1];
 
   const setupLevel = useCallback((currentLevel: number) => {
@@ -202,11 +263,14 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
 
     setIsBossActive(false); setBoss(null);
     enemiesRef.current = []; bombsRef.current = []; bulletsRef.current = [];
-    ammoDropsRef.current = []; bossProjectilesRef.current = []; explosionsRef.current = [];
+    ammoDropsRef.current = []; currencyDropsRef.current = [];
+    bossProjectilesRef.current = []; explosionsRef.current = [];
     droneRef.current = null; droneBulletsRef.current = [];
     bossTargetRef.current = null; snakeShotCounter.current = 0;
     lastBossPowerUpTime.current = 0;
     resetAllPlayerDebuffs();
+    player1Ref.current = createPlayer(1);
+    if(isMultiplayer) player2Ref.current = createPlayer(2);
 
     // Reset timed power-ups
     setIsTimeSlow(false); setTimeSlowEndTime(0);
@@ -229,28 +293,9 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
       });
     }
     enemiesRef.current = newEnemies;
-  }, [isMultiplayer, equippedGun, resetAllPlayerDebuffs]);
+  }, [isMultiplayer, equippedGun, resetAllPlayerDebuffs, createPlayer]);
 
   useEffect(() => { setupLevel(level); }, [setupLevel, level]);
-
-  const handlePlayerHit = useCallback((hitPosition: Position) => {
-    explosionsRef.current.push({
-      id: `explosion-${Date.now()}`, x: hitPosition.x, y: hitPosition.y, startTime: Date.now(), emoji: '💥'
-    });
-
-    if (gameLoopRef.current !== null) { cancelAnimationFrame(gameLoopRef.current); gameLoopRef.current = null; }
-
-    if (lives - 1 <= 0) {
-      onGameOver({ p1: score1, p2: isMultiplayer ? score2 : undefined }, currentRunXp, powerUpCount, currentRunCurrency);
-    } else {
-      setLives(l => l - 1);
-      setCurrentRunCurrency(0);
-      player1Ref.current = createPlayer(1);
-      if (isMultiplayer) player2Ref.current = createPlayer(2);
-      setupLevel(level);
-      setIsRestarting(true);
-    }
-  }, [lives, onGameOver, score1, score2, isMultiplayer, setupLevel, level, currentRunCurrency, currentRunXp, powerUpCount, createPlayer]);
 
   const handleUsePowerUp = useCallback(() => {
     if (isPaused || !equippedPowerUpId || powerUpCount <= 0) return;
@@ -275,8 +320,16 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
           } else {
             setScore1(s => s + killedCount * 100);
           }
-          const currencyMultiplier = (isGoldRush ? 2 : 1) * (equippedPlaneId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
-          setCurrentRunCurrency(c => c + (killedCount * ENEMY_CURRENCY_DROP * currencyMultiplier));
+           const currencyMultiplier = isGoldRush ? 2 : 1;
+           const baseAmount = ENEMY_CURRENCY_DROP * (equippedBoatId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
+           killedEnemies.forEach(enemy => currencyDropsRef.current.push({
+                id: `curr-nuke-${enemy.id}`,
+                x: enemy.x + ENEMY_WIDTH / 2,
+                y: enemy.y + ENEMY_HEIGHT / 2,
+                width: CURRENCY_DROP_WIDTH, height: CURRENCY_DROP_HEIGHT,
+                amount: baseAmount * currencyMultiplier,
+                emoji: '💰'
+           }));
           setCurrentRunXp(xp => xp + killedCount * ENEMY_XP_DROP);
           killedEnemies.forEach(enemy => explosionsRef.current.push({
             id: `explosion-nuke-${enemy.id}`,
@@ -316,8 +369,12 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             };
         }
         break;
+       case 'pw7': // Repair Kit
+        if (!isPlayer1Dead) setPlayer1Hp(hp => Math.min(player1MaxHp, hp + player1MaxHp * 0.5));
+        if (isMultiplayer && !isPlayer2Dead) setPlayer2Hp(hp => Math.min(player2MaxHp, hp + player2MaxHp * 0.5));
+        break;
     }
-  }, [isPaused, equippedPowerUpId, powerUpCount, isMultiplayer, isGoldRush, equippedPlaneId]);
+  }, [isPaused, equippedPowerUpId, powerUpCount, isMultiplayer, isGoldRush, equippedBoatId, isPlayer1Dead, isPlayer2Dead, player1MaxHp, player2MaxHp]);
 
   const draw = useCallback(() => {
     const ctx = canvasRef.current?.getContext('2d');
@@ -334,6 +391,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     
     ctx.font = '30px sans-serif';
     ammoDropsRef.current.forEach(d => ctx.fillText(d.emoji, d.x, d.y));
+    currencyDropsRef.current.forEach(d => ctx.fillText(d.emoji, d.x, d.y));
 
     ctx.font = '24px sans-serif';
     bombsRef.current.forEach(b => ctx.fillText(b.emoji, b.x, b.y));
@@ -392,12 +450,12 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         ctx.fillText(droneRef.current.emoji, droneRef.current.x, droneRef.current.y);
     }
     
-    if (!isRestarting) {
-        // Player 1
+    // Player 1
+    if (!isPlayer1Dead) {
         ctx.save();
         ctx.font = '48px sans-serif';
         if (isInvincible) ctx.filter = `drop-shadow(0 0 10px #0ff) drop-shadow(0 0 5px #0ff)`;
-        ctx.fillText(equippedPlane.emoji, player1Ref.current.x, player1Ref.current.y);
+        ctx.fillText(equippedBoat.emoji, player1Ref.current.x, player1Ref.current.y);
         ctx.restore();
         if (isInvincible) {
             ctx.font = '70px sans-serif';
@@ -409,16 +467,18 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         if (isPlayer1Stunned) ctx.fillText('⚡️', player1Ref.current.x + 12, player1Ref.current.y - 10);
         if (isPlayer1Slowed) ctx.fillText('🐌', player1Ref.current.x - 12, player1Ref.current.y + 30);
         if (isPlayer1ControlsReversed) ctx.fillText('❓', player1Ref.current.x + 12, player1Ref.current.y - 10);
-        
-        // Player 2
-        if(isMultiplayer && player2Ref.current) {
-            ctx.font = '48px sans-serif';
-            ctx.fillText(PLAYER_2_EMOJI, player2Ref.current.x, player2Ref.current.y);
-            ctx.font = '30px sans-serif';
-            if (isPlayer2Stunned) ctx.fillText('⚡️', player2Ref.current.x + 12, player2Ref.current.y - 10);
-            if (isPlayer2Slowed) ctx.fillText('🐌', player2Ref.current.x - 12, player2Ref.current.y + 30);
-            if (isPlayer2ControlsReversed) ctx.fillText('❓', player2Ref.current.x + 12, player2Ref.current.y - 10);
-        }
+    }
+    
+    // Player 2
+    if(isMultiplayer && player2Ref.current && !isPlayer2Dead) {
+        ctx.save();
+        ctx.font = '48px sans-serif';
+        ctx.fillText(PLAYER_2_EMOJI, player2Ref.current.x, player2Ref.current.y);
+        ctx.restore();
+        ctx.font = '30px sans-serif';
+        if (isPlayer2Stunned) ctx.fillText('⚡️', player2Ref.current.x + 12, player2Ref.current.y - 10);
+        if (isPlayer2Slowed) ctx.fillText('🐌', player2Ref.current.x - 12, player2Ref.current.y + 30);
+        if (isPlayer2ControlsReversed) ctx.fillText('❓', player2Ref.current.x + 12, player2Ref.current.y - 10);
     }
 
     explosionsRef.current.forEach(exp => {
@@ -435,8 +495,44 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             ctx.restore();
         }
     });
+    
+    if (qteDodgeState) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(0, 150, 255, 0.15)';
+        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-  }, [boss, isBossActive, equippedPlane.emoji, isInvincible, isPlayer1Stunned, isPlayer2Stunned, isMultiplayer, isRestarting, isPlayer1Slowed, isPlayer1ControlsReversed, isPlayer2Slowed, isPlayer2ControlsReversed]);
+        const player = qteDodgeState.playerId === 1 ? player1Ref.current : player2Ref.current;
+        if (player) {
+            const displayX = player.x + PLAYER_WIDTH / 2;
+            const displayY = player.y - 60;
+
+            const timeElapsed = now - qteDodgeState.startTime;
+            const timeRemaining = 1 - (timeElapsed / QTE_DODGE_SLOW_MO_DURATION);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.fillRect(displayX - 80, displayY + 40, 160, 10);
+            ctx.fillStyle = '#fef08a'; // yellow-300
+            ctx.fillRect(displayX - 80, displayY + 40, 160 * timeRemaining, 10);
+            
+            ctx.font = '40px sans-serif';
+            ctx.textAlign = 'center';
+            qteDodgeState.sequence.forEach((key, index) => {
+                const keyDisplayMap: {[key: string]: string} = {
+                    'w': '↑', 'a': '←', 's': '↓', 'd': '→',
+                    'arrowup': '↑', 'arrowleft': '←', 'arrowdown': '↓', 'arrowright': '→'
+                };
+                
+                if (index < qteDodgeState.currentIndex) {
+                    ctx.fillStyle = '#4ade80'; // green-400
+                } else {
+                    ctx.fillStyle = 'white';
+                }
+                ctx.fillText(keyDisplayMap[key] || key.toUpperCase(), displayX - 60 + (index * 40), displayY);
+            });
+        }
+        ctx.restore();
+    }
+
+  }, [boss, isBossActive, equippedBoat.emoji, isInvincible, isPlayer1Stunned, isPlayer2Stunned, isMultiplayer, isPlayer1Slowed, isPlayer1ControlsReversed, isPlayer2Slowed, isPlayer2ControlsReversed, isPlayer1Dead, isPlayer2Dead, qteDodgeState]);
   
   const checkCollision = (a: {x:number, y:number, width:number, height:number}, b: {x:number, y:number, width:number, height:number}) => {
     return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
@@ -445,72 +541,29 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const gameLoop = useCallback(() => {
     const now = Date.now();
     let currentBoss = boss;
-    const speedMultiplier = isTimeSlow ? 0.5 : 1;
+    const speedMultiplier = qteDodgeState ? QTE_DODGE_SLOW_MO_FACTOR : isTimeSlow ? 0.5 : 1;
     const damageBonus = 1 + (playerLevel - 1) * DAMAGE_BONUS_PER_LEVEL;
+    const damageReduction = equippedBoat.damageReduction || 0;
+    const damageMultiplier = 1 - damageReduction;
+
+    if (qteDodgeState && now > qteDodgeState.startTime + QTE_DODGE_SLOW_MO_DURATION) {
+        // FAILURE due to timeout
+        const playerToDamage = qteDodgeState.playerId === 1 ? 1 : 2;
+        const finalDamage = HIT_DAMAGE * damageMultiplier;
+        if (playerToDamage === 1) setPlayer1Hp(hp => Math.max(0, hp - finalDamage));
+        else setPlayer2Hp(hp => Math.max(0, hp - finalDamage));
+
+        if (qteDodgeState.entityType === 'projectile') {
+            bossProjectilesRef.current = bossProjectilesRef.current.filter(p => p.id !== qteDodgeState.triggeringEntityId);
+        } else {
+            enemiesRef.current = enemiesRef.current.filter(e => e.id !== qteDodgeState.triggeringEntityId);
+        }
+        setQteDodgeState(null);
+    }
 
     // --- Gravity effects ---
     const blackHole = currentBoss?.type === '⚫️' ? currentBoss : null;
     const galaxy = currentBoss?.type === '🌌' ? currentBoss : null;
-
-    // --- Auto-Dodge Logic ---
-    const performAutoDodge = (player: Player, lastDodgeTimeRef: React.MutableRefObject<number>) => {
-        if (equippedPlaneId !== 'p5' || isInvincibleRef.current || now - lastDodgeTimeRef.current < AUTO_DODGE_COOLDOWN) {
-            return;
-        }
-
-        const dangerZone = {
-            x: player.x - AUTO_DODGE_DANGER_RADIUS / 2,
-            y: player.y - AUTO_DODGE_DANGER_RADIUS / 2,
-            width: PLAYER_WIDTH + AUTO_DODGE_DANGER_RADIUS,
-            height: PLAYER_HEIGHT + AUTO_DODGE_DANGER_RADIUS,
-        };
-
-        const threats = [...bossProjectilesRef.current, ...enemiesRef.current];
-        
-        for (const threat of threats) {
-            if (checkCollision(threat, dangerZone)) {
-                const originalX = player.x;
-                
-                if (threat.x < player.x) { // Threat is on the left, dodge right
-                    player.x += AUTO_DODGE_DISTANCE;
-                } else { // Threat is on the right, dodge left
-                    player.x -= AUTO_DODGE_DISTANCE;
-                }
-                
-                player.x = Math.max(0, Math.min(GAME_WIDTH - PLAYER_WIDTH, player.x));
-
-                if (player.x !== originalX) {
-                    // Create retaliation pulse
-                    explosionsRef.current.push({
-                        id: `dodge-${player.id}-${now}`, x: originalX + PLAYER_WIDTH / 2, y: player.y + PLAYER_HEIGHT / 2, startTime: now, emoji: '✨'
-                    });
-                    lastDodgeTimeRef.current = now;
-
-                    // Destroy nearby weak projectiles
-                    const projectilesToDestroy = new Set<string>();
-                    const pulseCenter = { x: originalX + PLAYER_WIDTH / 2, y: player.y + PLAYER_HEIGHT / 2 };
-                    bossProjectilesRef.current.forEach(proj => {
-                        if (!proj.health && !proj.isStun) { // Don't destroy special projectiles
-                            const projCenter = { x: proj.x + proj.width / 2, y: proj.y + proj.height / 2 };
-                            const distanceSq = (pulseCenter.x - projCenter.x)**2 + (pulseCenter.y - projCenter.y)**2;
-                            if (distanceSq < AEGIS_RETALIATION_PULSE_RADIUS**2) {
-                                projectilesToDestroy.add(proj.id);
-                            }
-                        }
-                    });
-                    if (projectilesToDestroy.size > 0) {
-                        bossProjectilesRef.current = bossProjectilesRef.current.filter(p => !projectilesToDestroy.has(p.id));
-                    }
-                    break; 
-                }
-            }
-        }
-    };
-    
-    performAutoDodge(player1Ref.current, lastAutoDodgeTimeP1);
-    if (isMultiplayer && player2Ref.current) {
-        performAutoDodge(player2Ref.current, lastAutoDodgeTimeP2);
-    }
 
     // --- Player Movement ---
     const updatePlayerPosition = (player: Player, keys: { left: string, right: string, up: string, down: string }, pushForce: typeof player1PushForce.current, isSlowed: boolean, isReversed: boolean) => {
@@ -555,8 +608,8 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         player.y = Math.max(0, Math.min(GAME_HEIGHT - PLAYER_HEIGHT, player.y));
     };
     
-    updatePlayerPosition(player1Ref.current, { left: 'a', right: 'd', up: 'w', down: 's'}, player1PushForce.current, isPlayer1Slowed, isPlayer1ControlsReversed);
-    if(isMultiplayer && player2Ref.current) {
+    if(!isPlayer1Dead && !qteDodgeState) updatePlayerPosition(player1Ref.current, { left: 'a', right: 'd', up: 'w', down: 's'}, player1PushForce.current, isPlayer1Slowed, isPlayer1ControlsReversed);
+    if(isMultiplayer && player2Ref.current && !isPlayer2Dead && !qteDodgeState) {
         updatePlayerPosition(player2Ref.current, { left: 'arrowleft', right: 'arrowright', up: 'arrowup', down: 'arrowdown'}, player2PushForce.current, isPlayer2Slowed, isPlayer2ControlsReversed);
     }
    
@@ -577,23 +630,33 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
 
     bombsRef.current = bombsRef.current.map(b => {
       const gravity = applyGravity(b);
-      return { ...b, x: b.x + gravity.dx, y: b.y - BOMB_SPEED + gravity.dy };
+      return { ...b, x: b.x + gravity.dx, y: b.y - BOMB_SPEED * speedMultiplier + gravity.dy };
     }).filter(b => b.y > -BOMB_HEIGHT);
 
     bulletsRef.current = bulletsRef.current.map(b => {
       const gravity = applyGravity(b);
-      return { ...b, x: b.x + gravity.dx, y: b.y - BULLET_SPEED + gravity.dy };
+      return { ...b, x: b.x + gravity.dx, y: b.y - BULLET_SPEED * speedMultiplier + gravity.dy };
     }).filter(b => b.y > -BULLET_HEIGHT);
     
     droneBulletsRef.current = droneBulletsRef.current.map(b => {
       const gravity = applyGravity(b);
-      return { ...b, x: b.x + gravity.dx, y: b.y - BULLET_SPEED + gravity.dy };
+      return { ...b, x: b.x + gravity.dx, y: b.y - BULLET_SPEED * speedMultiplier + gravity.dy };
     }).filter(b => b.y > -BULLET_HEIGHT);
 
-    enemiesRef.current = enemiesRef.current.map(e => ({ ...e, x: e.x + (e.dx || 0), y: e.y + (e.dy || ENEMY_SPEED) * speedMultiplier })).filter(e => e.y < GAME_HEIGHT && e.x > -ENEMY_WIDTH && e.x < GAME_WIDTH);
-    ammoDropsRef.current = ammoDropsRef.current.map(d => ({ ...d, y: d.y + ENEMY_SPEED * 0.5 * speedMultiplier })).filter(d => d.y < GAME_HEIGHT);
+    enemiesRef.current = enemiesRef.current.map(e => ({ ...e, x: e.x + (e.dx || 0) * speedMultiplier, y: e.y + (e.dy || ENEMY_SPEED) * speedMultiplier })).filter(e => e.y < GAME_HEIGHT && e.x > -ENEMY_WIDTH && e.x < GAME_WIDTH);
+    
+    const updateDrops = <T extends AmmoDrop | CurrencyDrop>(drops: T[]): T[] => {
+        return drops.map(d => {
+            const newY = d.y + ENEMY_SPEED * 0.5 * speedMultiplier;
+            const newX = d.x;
+            return { ...d, y: newY, x: newX };
+        }).filter(d => d.y < GAME_HEIGHT);
+    };
+    ammoDropsRef.current = updateDrops(ammoDropsRef.current);
+    currencyDropsRef.current = updateDrops(currencyDropsRef.current);
+    
     bossProjectilesRef.current = bossProjectilesRef.current
-        .map(p => ({ ...p, x: p.x + (p.dx || 0), y: p.y + (p.dy || BOSS_PROJECTILE_SPEED) * speedMultiplier, }))
+        .map(p => ({ ...p, x: p.x + (p.dx || 0) * speedMultiplier, y: p.y + (p.dy || BOSS_PROJECTILE_SPEED) * speedMultiplier, }))
         .filter(p => {
             const alive = !(p.lifetime && p.createdAt && now > p.createdAt + p.lifetime);
             const inBounds = p.y < GAME_HEIGHT && p.y > -BOSS_PROJECTILE_HEIGHT && p.x < GAME_WIDTH && p.x > -BOSS_PROJECTILE_WIDTH;
@@ -603,13 +666,11 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
 
     // --- Drone Logic ---
     if (droneRef.current) {
-        // Movement (lerp for smooth follow)
         const targetX = player1Ref.current.x - (DRONE_WIDTH + 10);
         const targetY = player1Ref.current.y;
         droneRef.current.x += (targetX - droneRef.current.x) * 0.1;
         droneRef.current.y += (targetY - droneRef.current.y) * 0.1;
 
-        // Shooting
         if (now - droneRef.current.lastFireTime > DRONE_FIRE_COOLDOWN) {
             droneRef.current.lastFireTime = now;
             droneBulletsRef.current.push({
@@ -629,49 +690,53 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     const bombDamage = equippedBomb.damage * damageBonus;
     const gunDamage = equippedGun ? equippedGun.damage * damageBonus : 0;
     const fireRateMultiplier = isRapidFire ? 2 : 1;
-    const bombCooldown = (equippedPlaneId === 'p5' ? BOMB_COOLDOWN * 0.75 : BOMB_COOLDOWN) / fireRateMultiplier;
+    const bombCooldown = (equippedBoatId === 'p5' ? BOMB_COOLDOWN * 0.75 : BOMB_COOLDOWN) / fireRateMultiplier;
 
-    if (keysPressed.current.has(' ') && !isPlayer1Stunned) {
-        if (p1Weapon === 'bomb' && now - lastFireTimeP1.current > bombCooldown) {
-            lastFireTimeP1.current = now;
-            const commonBombProps = { playerId: 1, y: player1Ref.current.y, width: BOMB_WIDTH, height: BOMB_HEIGHT, damage: bombDamage, emoji: equippedBomb.emoji };
-            if (equippedPlaneId === 'p5') {
-                bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p1-1`, x: player1Ref.current.x + PLAYER_WIDTH / 2 - BOMB_WIDTH - 5 });
-                bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p1-2`, x: player1Ref.current.x + PLAYER_WIDTH / 2 + 5 });
-            } else {
-                bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p1`, x: player1Ref.current.x + PLAYER_WIDTH/2 - BOMB_WIDTH/2 });
-            }
-        } else if (p1Weapon === 'gun' && equippedGun && p1Ammo > 0 && now - lastFireTimeP1.current > GUN_COOLDOWN / fireRateMultiplier) {
-            lastFireTimeP1.current = now;
-            bulletsRef.current.push({ id: `bu-${now}-p1`, playerId: 1, x: player1Ref.current.x + PLAYER_WIDTH/2 - BULLET_WIDTH/2, y: player1Ref.current.y, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: gunDamage, emoji: equippedGun.emoji });
-            setP1Ammo(a => a - 1);
+    const fireWeapon = (playerRef: React.MutableRefObject<Player>, lastFireTimeRef: React.MutableRefObject<number>, weapon: WeaponSelection, setAmmo: (fn: (a: number) => number) => void, ammo: number) => {
+        const player = playerRef.current;
+        if (weapon === 'bomb' && now - lastFireTimeRef.current > bombCooldown) {
+            lastFireTimeRef.current = now;
+            const commonBombProps = { playerId: player.playerId, y: player.y, width: BOMB_WIDTH, height: BOMB_HEIGHT, damage: bombDamage, emoji: equippedBomb.emoji };
+            bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p${player.playerId}`, x: player.x + PLAYER_WIDTH/2 - BOMB_WIDTH/2 });
+            return true;
+        } else if (weapon === 'gun' && equippedGun && ammo > 0 && now - lastFireTimeRef.current > GUN_COOLDOWN / fireRateMultiplier) {
+            lastFireTimeRef.current = now;
+            bulletsRef.current.push({ id: `bu-${now}-p${player.playerId}`, playerId: player.playerId, x: player.x + PLAYER_WIDTH/2 - BULLET_WIDTH/2, y: player.y, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: gunDamage, emoji: equippedGun.emoji });
+            setAmmo(a => a - 1);
+            return true;
         }
+        return false;
     }
-    if (isMultiplayer && player2Ref.current && keysPressed.current.has('/') && !isPlayer2Stunned) {
-        if (p2Weapon === 'bomb' && now - lastFireTimeP2.current > bombCooldown) {
-            lastFireTimeP2.current = now;
-            const commonBombProps = { playerId: 2, y: player2Ref.current.y, width: BOMB_WIDTH, height: BOMB_HEIGHT, damage: bombDamage, emoji: equippedBomb.emoji };
-            if (equippedPlaneId === 'p5') {
-                bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p2-1`, x: player2Ref.current.x + PLAYER_WIDTH / 2 - BOMB_WIDTH - 5 });
-                bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p2-2`, x: player2Ref.current.x + PLAYER_WIDTH / 2 + 5 });
-            } else {
-                bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p2`, x: player2Ref.current.x + PLAYER_WIDTH/2 - BOMB_WIDTH/2 });
-            }
-        } else if (p2Weapon === 'gun' && equippedGun && p2Ammo > 0 && now - lastFireTimeP2.current > GUN_COOLDOWN / fireRateMultiplier) {
-            lastFireTimeP2.current = now;
-            bulletsRef.current.push({ id: `bu-${now}-p2`, playerId: 2, x: player2Ref.current.x + PLAYER_WIDTH/2 - BULLET_WIDTH/2, y: player2Ref.current.y, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: gunDamage, emoji: equippedGun.emoji });
-            setP2Ammo(a => a - 1);
-        }
+    
+    if (keysPressed.current.has(' ') && !isPlayer1Stunned && !isPlayer1Dead && !qteDodgeState) {
+        fireWeapon(player1Ref, lastFireTimeP1, p1Weapon, setP1Ammo, p1Ammo);
+    }
+    if (isMultiplayer && player2Ref.current && keysPressed.current.has('/') && !isPlayer2Stunned && !isPlayer2Dead && !qteDodgeState) {
+        fireWeapon(player2Ref, lastFireTimeP2, p2Weapon, setP2Ammo, p2Ammo);
     }
 
-    // Aegis Interceptor Integrated Lasers
-    if (equippedPlaneId === 'p5') {
-        if (now - lastAegisLaserTimeP1.current > AEGIS_LASER_COOLDOWN) {
+    // Battleship side cannons
+    if (equippedBoatId === 'p3') {
+        if (now - lastSideCannonTimeP1.current > BATTLESHIP_SIDE_CANNON_COOLDOWN && !isPlayer1Dead) {
+            lastSideCannonTimeP1.current = now;
+            bulletsRef.current.push({ id: `bs-${now}-p1-l`, playerId: 1, x: player1Ref.current.x, y: player1Ref.current.y + PLAYER_HEIGHT / 2, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: 1 * damageBonus, emoji: '•' });
+            bulletsRef.current.push({ id: `bs-${now}-p1-r`, playerId: 1, x: player1Ref.current.x + PLAYER_WIDTH - BULLET_WIDTH, y: player1Ref.current.y + PLAYER_HEIGHT / 2, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: 1 * damageBonus, emoji: '•' });
+        }
+        if (isMultiplayer && player2Ref.current && now - lastSideCannonTimeP2.current > BATTLESHIP_SIDE_CANNON_COOLDOWN && !isPlayer2Dead) {
+            lastSideCannonTimeP2.current = now;
+            bulletsRef.current.push({ id: `bs-${now}-p2-l`, playerId: 2, x: player2Ref.current.x, y: player2Ref.current.y + PLAYER_HEIGHT / 2, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: 1 * damageBonus, emoji: '•' });
+            bulletsRef.current.push({ id: `bs-${now}-p2-r`, playerId: 2, x: player2Ref.current.x + PLAYER_WIDTH - BULLET_WIDTH, y: player2Ref.current.y + PLAYER_HEIGHT / 2, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: 1 * damageBonus, emoji: '•' });
+        }
+    }
+
+    // AI Ship Integrated Lasers
+    if (equippedBoatId === 'p5') {
+        if (now - lastAegisLaserTimeP1.current > AEGIS_LASER_COOLDOWN && !isPlayer1Dead) {
             lastAegisLaserTimeP1.current = now;
             bulletsRef.current.push({ id: `al-${now}-p1-1`, playerId: 1, x: player1Ref.current.x, y: player1Ref.current.y + PLAYER_HEIGHT / 4, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: AEGIS_LASER_DAMAGE * damageBonus, emoji: '⚡️' });
             bulletsRef.current.push({ id: `al-${now}-p1-2`, playerId: 1, x: player1Ref.current.x + PLAYER_WIDTH - BULLET_WIDTH, y: player1Ref.current.y + PLAYER_HEIGHT / 4, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: AEGIS_LASER_DAMAGE * damageBonus, emoji: '⚡️' });
         }
-        if (isMultiplayer && player2Ref.current && now - lastAegisLaserTimeP2.current > AEGIS_LASER_COOLDOWN) {
+        if (isMultiplayer && player2Ref.current && now - lastAegisLaserTimeP2.current > AEGIS_LASER_COOLDOWN && !isPlayer2Dead) {
             lastAegisLaserTimeP2.current = now;
             bulletsRef.current.push({ id: `al-${now}-p2-1`, playerId: 2, x: player2Ref.current.x, y: player2Ref.current.y + PLAYER_HEIGHT / 4, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: AEGIS_LASER_DAMAGE * damageBonus, emoji: '⚡️' });
             bulletsRef.current.push({ id: `al-${now}-p2-2`, playerId: 2, x: player2Ref.current.x + PLAYER_WIDTH - BULLET_WIDTH, y: player2Ref.current.y + PLAYER_HEIGHT / 4, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: AEGIS_LASER_DAMAGE * damageBonus, emoji: '⚡️' });
@@ -750,13 +815,13 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
                 bossTargetRef.current = { x: targetX, y: targetY };
             }
             const target = bossTargetRef.current; const dirX = target.x - currentBoss.x; const dirY = target.y - currentBoss.y; const len = Math.sqrt(dirX * dirX + dirY * dirY);
-            if (len > BOSS_SPEED) { currentBoss.x += (dirX / len) * BOSS_SPEED; currentBoss.y += (dirY / len) * BOSS_SPEED; } else { currentBoss.x = target.x; currentBoss.y = target.y; }
+            if (len > BOSS_SPEED) { currentBoss.x += (dirX / len) * BOSS_SPEED * speedMultiplier; currentBoss.y += (dirY / len) * BOSS_SPEED * speedMultiplier; } else { currentBoss.x = target.x; currentBoss.y = target.y; }
         } else if (['🧙', '🏺', '⚫️'].includes(currentBoss.type)) {
             // Stationary or special movement bosses
         } else if (currentBoss.type === '🐺') {
             const targetX = player1Ref.current.x;
             if (Math.abs(targetX - currentBoss.x) > PLAYER_WIDTH) {
-                currentBoss.x += Math.sign(targetX - currentBoss.x) * BOSS_SPEED * 0.5;
+                currentBoss.x += Math.sign(targetX - currentBoss.x) * BOSS_SPEED * 0.5 * speedMultiplier;
             }
         } else {
             let newBossX = currentBoss.x + BOSS_SPEED * bossDirection.current * speedMultiplier;
@@ -781,7 +846,24 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
                     case '🐙': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2, }); break;
                     case '🦈': for (let i = -1; i <= 1; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: i * (BOSS_PROJECTILE_SPEED * 0.5), dy: BOSS_PROJECTILE_SPEED, }); break;
                     case '🦀': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-1`, x: currentBoss.x + 10 }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: currentBoss.x + BOSS_WIDTH - BOSS_PROJECTILE_WIDTH - 10 }); break;
-                    case '🐡': { const targetPlayerPuffer = !player2Ref.current || Math.random() < 0.5 ? player1Ref.current : player2Ref.current; const pCenterX_p = targetPlayerPuffer.x + PLAYER_WIDTH / 2; const bCenterX_p = currentBoss.x + BOSS_WIDTH / 2; const dirX_p = pCenterX_p - bCenterX_p; const dirY_p = (targetPlayerPuffer.y + PLAYER_HEIGHT / 2) - (currentBoss.y + BOSS_HEIGHT / 2); const len_p = Math.sqrt(dirX_p * dirX_p + dirY_p * dirY_p); if (len_p > 0) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-homing`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: (dirX_p / len_p) * BOSS_PROJECTILE_SPEED, dy: (dirY_p / len_p) * BOSS_PROJECTILE_SPEED, }); break; }
+                    case '🐡': { 
+                        let targetPlayerPuffer: Player | null = null;
+                        const canTargetP1 = !isPlayer1Dead;
+                        const canTargetP2 = isMultiplayer && player2Ref.current && !isPlayer2Dead;
+
+                        if (canTargetP1 && canTargetP2) {
+                            targetPlayerPuffer = Math.random() < 0.5 ? player1Ref.current : player2Ref.current!;
+                        } else if (canTargetP1) {
+                            targetPlayerPuffer = player1Ref.current;
+                        } else if (canTargetP2) {
+                            targetPlayerPuffer = player2Ref.current!;
+                        }
+
+                        if(targetPlayerPuffer) {
+                            const pCenterX_p = targetPlayerPuffer.x + PLAYER_WIDTH / 2; const bCenterX_p = currentBoss.x + BOSS_WIDTH / 2; const dirX_p = pCenterX_p - bCenterX_p; const dirY_p = (targetPlayerPuffer.y + PLAYER_HEIGHT / 2) - (currentBoss.y + BOSS_HEIGHT / 2); const len_p = Math.sqrt(dirX_p * dirX_p + dirY_p * dirY_p); if (len_p > 0) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-homing`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: (dirX_p / len_p) * BOSS_PROJECTILE_SPEED, dy: (dirY_p / len_p) * BOSS_PROJECTILE_SPEED, });
+                        }
+                        break; 
+                    }
                     case '🦞': for (let i = 0; i < 3; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, y: baseProjectile.y + (i * 40), dy: BOSS_PROJECTILE_SPEED * 1.2, }); break;
                     case '🐚': for (let i = 0; i < 2; i++) { const angle = (snakeShotCounter.current / 8) * (2 * Math.PI) + (i * Math.PI); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.cos(angle) * BOSS_PROJECTILE_SPEED, dy: Math.sin(angle) * BOSS_PROJECTILE_SPEED, }); } snakeShotCounter.current++; break;
                     case '🦪': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-mid`, x: currentBoss.x + BOSS_WIDTH / 2, dy: BOSS_PROJECTILE_SPEED * 0.7 }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-left`, x: currentBoss.x, dy: BOSS_PROJECTILE_SPEED * 1.4 }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-right`, x: currentBoss.x + BOSS_WIDTH - BOSS_PROJECTILE_WIDTH, dy: BOSS_PROJECTILE_SPEED * 1.4 }); break;
@@ -857,58 +939,134 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     
     // --- Collision Detection ---
     if (!isInvincibleRef.current) {
-        let hitPosition: Position | null = null;
-        const players = [player1Ref.current, player2Ref.current].filter((p): p is Player => p !== null);
-        
-        for (const player of players) {
-            const stunSetter = player.playerId === 1 ? setIsPlayer1Stunned : setIsPlayer2Stunned;
-            const timeoutRef = player.playerId === 1 ? stunTimeoutP1 : stunTimeoutP2;
+        let damageToP1 = 0;
+        let damageToP2 = 0;
+        const enemiesToRemove = new Set<string>();
+        const projectilesToRemove = new Set<string>();
 
-            if (enemiesRef.current.some(enemy => checkCollision(player, enemy))) { hitPosition = { x: player.x, y: player.y }; break; }
-            if (currentBoss?.subEntities?.some(sub => checkCollision(player, sub))) { hitPosition = { x: player.x, y: player.y }; break; }
-            if (blackHole && checkCollision(player, { ...blackHole, x: blackHole.x+20, y: blackHole.y+20, width: blackHole.width-40, height: blackHole.height-40 })) { hitPosition = { x: player.x, y: player.y }; break; }
-            if (currentBoss && isBossActive && checkCollision(player, currentBoss) && currentBoss.type !== '⚫️') { hitPosition = { x: player.x, y: player.y }; break; }
-
-            if (currentBoss?.powerUp?.active && currentBoss.powerUp.type === 'GORILLA_POUND') {
-                if (player.y > GAME_HEIGHT - 30 - PLAYER_HEIGHT) { hitPosition = { x: player.x, y: player.y }; break; }
+        const checkAndTriggerQTE = (player: Player, threat: Enemy | BossProjectile, entityType: 'enemy' | 'projectile', lastQteTimeRef: React.MutableRefObject<number>): boolean => {
+            if (equippedBoatId !== 'p5' || qteDodgeState || now - lastQteTimeRef.current < QTE_DODGE_COOLDOWN) {
+                return false;
             }
+            
+            const dangerZone = {
+                x: player.x + PLAYER_WIDTH / 2 - QTE_DODGE_DANGER_RADIUS,
+                y: player.y + PLAYER_HEIGHT / 2 - QTE_DODGE_DANGER_RADIUS,
+                width: QTE_DODGE_DANGER_RADIUS * 2,
+                height: QTE_DODGE_DANGER_RADIUS * 2,
+            };
 
-            const projectilesToRemove = new Set<string>();
-            for (const projectile of bossProjectilesRef.current) {
-                if (checkCollision(player, projectile)) {
-                    projectilesToRemove.add(projectile.id);
-                    if (projectile.isStun && projectile.stunDuration) {
-                        const debuffType = (currentBoss?.type === '🦂' || currentBoss?.type === '🧊') ? 'slow' : 'stun';
-                        if (debuffType === 'slow') {
-                           const slowSetter = player.playerId === 1 ? setIsPlayer1Slowed : setIsPlayer2Slowed;
-                           const slowTimeout = player.playerId === 1 ? slowTimeoutP1 : slowTimeoutP2;
-                           if (slowTimeout.current) clearTimeout(slowTimeout.current);
-                           slowSetter(true);
-                           slowTimeout.current = window.setTimeout(() => slowSetter(false), projectile.stunDuration);
-                        } else { // Normal stun
-                           if (timeoutRef.current) clearTimeout(timeoutRef.current);
-                           stunSetter(true);
-                           timeoutRef.current = window.setTimeout(() => stunSetter(false), projectile.stunDuration);
-                        }
-                    } else { hitPosition = { x: player.x, y: player.y }; break; }
+            if (checkCollision(dangerZone, threat)) {
+                lastQteTimeRef.current = now;
+                const p1Keys = ['w', 'a', 's', 'd'];
+                const p2Keys = ['arrowup', 'arrowleft', 'arrowdown', 'arrowright'];
+                const keySet = player.playerId === 1 ? p1Keys : p2Keys;
+                const sequence = Array.from({ length: QTE_DODGE_SEQUENCE_LENGTH }, () => keySet[Math.floor(Math.random() * keySet.length)]);
+                
+                setQteDodgeState({
+                    isActive: true,
+                    startTime: now,
+                    sequence,
+                    currentIndex: 0,
+                    playerId: player.playerId,
+                    triggeringEntityId: threat.id,
+                    entityType,
+                });
+                return true;
+            }
+            return false;
+        };
+
+        for (const enemy of enemiesRef.current) {
+            let wasQteTriggered = false;
+            if (!isPlayer1Dead && !wasQteTriggered) {
+                if (checkAndTriggerQTE(player1Ref.current, enemy, 'enemy', lastQteTriggerTimeP1)) {
+                    wasQteTriggered = true;
+                } else if (checkCollision(player1Ref.current, enemy)) {
+                    damageToP1 += HIT_DAMAGE * damageMultiplier;
+                    enemiesToRemove.add(enemy.id);
+                    explosionsRef.current.push({id: `exp-coll-p1-${enemy.id}`, x: enemy.x, y: enemy.y, startTime: now, emoji: '💥'});
                 }
             }
-            bossProjectilesRef.current = bossProjectilesRef.current.filter(p => !projectilesToRemove.has(p.id));
-            if (hitPosition) break;
+            if (isMultiplayer && player2Ref.current && !isPlayer2Dead && !wasQteTriggered) {
+                if (checkAndTriggerQTE(player2Ref.current, enemy, 'enemy', lastQteTriggerTimeP2)) {
+                    wasQteTriggered = true;
+                } else if (checkCollision(player2Ref.current, enemy)) {
+                    damageToP2 += HIT_DAMAGE * damageMultiplier;
+                    enemiesToRemove.add(enemy.id);
+                    explosionsRef.current.push({id: `exp-coll-p2-${enemy.id}`, x: enemy.x, y: enemy.y, startTime: now, emoji: '💥'});
+                }
+            }
         }
-        if (hitPosition) { handlePlayerHit(hitPosition); return; }
+
+        for (const p of bossProjectilesRef.current) {
+            let wasQteTriggered = false;
+            if (!isPlayer1Dead && !wasQteTriggered) {
+                if (checkAndTriggerQTE(player1Ref.current, p, 'projectile', lastQteTriggerTimeP1)) {
+                    wasQteTriggered = true;
+                } else if (checkCollision(player1Ref.current, p)) {
+                    if (!p.isStun) damageToP1 += HIT_DAMAGE * damageMultiplier;
+                    projectilesToRemove.add(p.id);
+                    if (p.isStun && p.stunDuration) {
+                        if (stunTimeoutP1.current) clearTimeout(stunTimeoutP1.current);
+                        setIsPlayer1Stunned(true);
+                        stunTimeoutP1.current = window.setTimeout(() => setIsPlayer1Stunned(false), p.stunDuration);
+                    }
+                }
+            }
+            if (isMultiplayer && player2Ref.current && !isPlayer2Dead && !wasQteTriggered) {
+                if (checkAndTriggerQTE(player2Ref.current, p, 'projectile', lastQteTriggerTimeP2)) {
+                    wasQteTriggered = true;
+                } else if (checkCollision(player2Ref.current, p)) {
+                    if (!p.isStun) damageToP2 += HIT_DAMAGE * damageMultiplier;
+                    projectilesToRemove.add(p.id);
+                    if (p.isStun && p.stunDuration) {
+                        if (stunTimeoutP2.current) clearTimeout(stunTimeoutP2.current);
+                        setIsPlayer2Stunned(true);
+                        stunTimeoutP2.current = window.setTimeout(() => setIsPlayer2Stunned(false), p.stunDuration);
+                    }
+                }
+            }
+        }
+
+        if (currentBoss && isBossActive) {
+            if (!isPlayer1Dead && checkCollision(player1Ref.current, currentBoss)) damageToP1 += HIT_DAMAGE * 2 * damageMultiplier;
+            if (isMultiplayer && player2Ref.current && !isPlayer2Dead && checkCollision(player2Ref.current, currentBoss)) damageToP2 += HIT_DAMAGE * 2 * damageMultiplier;
+        }
+
+        if (damageToP1 > 0) setPlayer1Hp(hp => Math.max(0, hp - damageToP1));
+        if (damageToP2 > 0) setPlayer2Hp(hp => Math.max(0, hp - damageToP2));
+        if (enemiesToRemove.size > 0) enemiesRef.current = enemiesRef.current.filter(e => !enemiesToRemove.has(e.id));
+        if (projectilesToRemove.size > 0) bossProjectilesRef.current = bossProjectilesRef.current.filter(p => !projectilesToRemove.has(p.id));
     }
 
-    if (equippedGun) {
-        const dropsToRemove = new Set<string>();
-        for (const drop of ammoDropsRef.current) {
-            if (checkCollision(player1Ref.current, drop)) { setP1Ammo(a => Math.min(equippedGun.maxAmmo, a + drop.amount)); dropsToRemove.add(drop.id); } 
-            else if (player2Ref.current && checkCollision(player2Ref.current, drop)) { setP2Ammo(a => Math.min(equippedGun.maxAmmo, a + drop.amount)); dropsToRemove.add(drop.id); }
+    const pickupDrops = () => {
+        const ammoDropsToRemove = new Set<string>();
+        if (equippedGun) {
+            for (const drop of ammoDropsRef.current) {
+                if (!isPlayer1Dead && checkCollision(player1Ref.current, drop)) { setP1Ammo(a => Math.min(equippedGun.maxAmmo, a + drop.amount)); ammoDropsToRemove.add(drop.id); } 
+                else if (isMultiplayer && player2Ref.current && !isPlayer2Dead && checkCollision(player2Ref.current, drop)) { setP2Ammo(a => Math.min(equippedGun.maxAmmo, a + drop.amount)); ammoDropsToRemove.add(drop.id); }
+            }
+            if (ammoDropsToRemove.size > 0) ammoDropsRef.current = ammoDropsRef.current.filter(d => !ammoDropsToRemove.has(d.id));
         }
-        if (dropsToRemove.size > 0) ammoDropsRef.current = ammoDropsRef.current.filter(d => !dropsToRemove.has(d.id));
+
+        const currencyDropsToRemove = new Set<string>();
+        for (const drop of currencyDropsRef.current) {
+            let collected = false;
+            if (!isPlayer1Dead && checkCollision(player1Ref.current, drop)) {
+                 setCurrentRunCurrency(c => c + drop.amount);
+                 collected = true;
+            } else if (isMultiplayer && player2Ref.current && !isPlayer2Dead && checkCollision(player2Ref.current, drop)) {
+                 setCurrentRunCurrency(c => c + drop.amount);
+                 collected = true;
+            }
+            if (collected) currencyDropsToRemove.add(drop.id);
+        }
+        if (currencyDropsToRemove.size > 0) currencyDropsRef.current = currencyDropsRef.current.filter(d => !currencyDropsToRemove.has(d.id));
     }
+    pickupDrops();
     
-    let score1ToAdd = 0, score2ToAdd = 0, currencyToAdd = 0, xpToAdd = 0;
+    let score1ToAdd = 0, score2ToAdd = 0, xpToAdd = 0;
     const bombsHit = new Set<string>(); const bulletsHit = new Set<string>(); const enemiesHit = new Set<string>(); const droneBulletsHit = new Set<string>();
     const allProjectiles = [...bombsRef.current.map(b => ({ ...b, type: 'bomb' })), ...bulletsRef.current.map(b => ({ ...b, type: 'bullet' })), ...droneBulletsRef.current.map(b => ({ ...b, type: 'drone_bullet' }))];
 
@@ -922,20 +1080,34 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
                 
                 enemiesHit.add(enemy.id);
                 if (proj.playerId === 1) score1ToAdd += 100; else score2ToAdd += 100;
-                const currencyMultiplier = (isGoldRush ? 2 : 1) * (equippedPlaneId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
-                currencyToAdd += ENEMY_CURRENCY_DROP * currencyMultiplier; 
+
+                const currencyMultiplier = isGoldRush ? 2 : 1;
+                const baseAmount = ENEMY_CURRENCY_DROP * (equippedBoatId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
+                currencyDropsRef.current.push({
+                    id: `curr-${enemy.id}`,
+                    x: enemy.x, y: enemy.y,
+                    width: CURRENCY_DROP_WIDTH, height: CURRENCY_DROP_HEIGHT,
+                    amount: baseAmount * currencyMultiplier,
+                    emoji: '💰',
+                });
+
                 xpToAdd += ENEMY_XP_DROP;
             }
         }
         if (currentBoss && isBossActive) {
-            if (checkCollision(proj, currentBoss) && currentBoss.type !== '⚫️') {
+            if (checkCollision(proj, currentBoss)) {
                 if (currentBoss.powerUp?.active && currentBoss.powerUp.type === 'KING_DECREE') { /* Invincible */ } 
                 else {
+                    let damageDealt = proj.damage;
+                    if (currentBoss.type === '⚫️') {
+                        damageDealt *= BLACK_HOLE_DIRECT_DAMAGE_MODIFIER;
+                    }
+
                     if (proj.type === 'bomb') bombsHit.add(proj.id);
                     else if (proj.type === 'bullet') bulletsHit.add(proj.id);
                     else droneBulletsHit.add(proj.id);
 
-                    currentBoss.health -= proj.damage;
+                    currentBoss.health -= damageDealt;
                     currentBoss.lastDamagedTime = now;
                     if (proj.playerId === 1) score1ToAdd += 50; else score2ToAdd += 50;
                     if (Math.random() < AMMO_DROP_CHANCE_ON_BOSS_HIT) {
@@ -984,13 +1156,19 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     
     if (score1ToAdd > 0) setScore1(s => s + score1ToAdd);
     if (score2ToAdd > 0) setScore2(s => s + score2ToAdd);
-    if (currencyToAdd > 0) setCurrentRunCurrency(c => c + currencyToAdd);
     if (xpToAdd > 0) setCurrentRunXp(xp => xp + xpToAdd);
     
     if (currentBoss && currentBoss.health <= 0) {
-        const currencyMultiplier = (isGoldRush ? 2 : 1) * (equippedPlaneId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
-        const bossCurrencyDrop = (BOSS_CURRENCY_DROP * level) * currencyMultiplier;
-        const finalCurrency = currentRunCurrency + currencyToAdd + bossCurrencyDrop;
+        const currencyMultiplier = isGoldRush ? 2 : 1;
+        const bossCurrencyDrop = (BOSS_CURRENCY_DROP * level) * currencyMultiplier * (equippedBoatId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
+        currencyDropsRef.current.push({
+            id: `curr-boss-${currentBoss.id}`,
+            x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2,
+            width: CURRENCY_DROP_WIDTH, height: CURRENCY_DROP_HEIGHT,
+            amount: bossCurrencyDrop,
+            emoji: '💰'
+        });
+        
         const finalXp = currentRunXp + xpToAdd + (BOSS_XP_DROP_BASE * level);
         const bossScore = 1000 * level;
         const finalP1Score = score1 + score1ToAdd + (isMultiplayer ? bossScore/2 : bossScore);
@@ -999,11 +1177,13 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         explosionsRef.current.push({ id: `exp-boss-${currentBoss.id}`, x: currentBoss.x, y: currentBoss.y, startTime: now, emoji: '💥' });
         
         if (level === LEVEL_CONFIGS.length) {
-            onGameWon({ p1: finalP1Score, p2: finalP2Score }, finalXp, powerUpCount, finalCurrency);
+            // Need to collect final drops before ending
+            pickupDrops();
+            onGameWon({ p1: finalP1Score, p2: finalP2Score }, finalXp, powerUpCount, currentRunCurrency + bossCurrencyDrop);
             return;
         }
+
         setLevel(l => l + 1);
-        setCurrentRunCurrency(c => c + currencyToAdd + bossCurrencyDrop);
         setCurrentRunXp(xp => xp + xpToAdd + (BOSS_XP_DROP_BASE * level));
         setScore1(s => s + score1ToAdd + (isMultiplayer ? bossScore / 2 : bossScore));
         if(isMultiplayer) setScore2(s => s + score2ToAdd + bossScore / 2);
@@ -1024,10 +1204,10 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
 
     draw();
     gameLoopRef.current = requestAnimationFrame(gameLoop);
-  }, [ draw, handlePlayerHit, isMultiplayer, playerLevel, equippedPlaneId, equippedBomb, equippedGun, isRapidFire, isTimeSlow, isGoldRush, isPlayer1Stunned, p1Weapon, p1Ammo, isPlayer2Stunned, p2Weapon, p2Ammo, boss, isBossActive, level, onGameWon, powerUpCount, currentRunCurrency, currentRunXp, score1, score2, levelConfig, isPlayer1ControlsReversed, isPlayer1Slowed, isPlayer2ControlsReversed, isPlayer2Slowed ]);
+  }, [ draw, isMultiplayer, playerLevel, equippedBoat, equippedBomb, equippedGun, isRapidFire, isTimeSlow, isGoldRush, isPlayer1Stunned, p1Weapon, p1Ammo, isPlayer2Stunned, p2Weapon, p2Ammo, boss, isBossActive, level, onGameWon, powerUpCount, currentRunCurrency, currentRunXp, score1, score2, levelConfig, isPlayer1ControlsReversed, isPlayer1Slowed, isPlayer2ControlsReversed, isPlayer2Slowed, isPlayer1Dead, isPlayer2Dead, qteDodgeState ]);
 
   useEffect(() => {
-    if (isPaused || isRestarting) {
+    if (isPaused) {
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
       return;
     }
@@ -1036,7 +1216,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
       if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
       resetAllPlayerDebuffs();
     };
-  }, [isPaused, isRestarting, gameLoop, resetAllPlayerDebuffs]);
+  }, [isPaused, gameLoop, resetAllPlayerDebuffs]);
 
   // Effect for scaling the game canvas
   useEffect(() => {
@@ -1051,12 +1231,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     return () => window.removeEventListener('resize', updateScale);
   }, []);
 
-  useEffect(() => {
-    if (isRestarting) {
-      const timer = setTimeout(() => setIsRestarting(false), 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isRestarting]);
   
   const handleTouchAction = useCallback((action: string, active: boolean) => {
     if (active) {
@@ -1079,6 +1253,77 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.repeat) return;
         const key = e.key.toLowerCase();
+
+        if (qteDodgeState) {
+            const p1Keys = ['w', 'a', 's', 'd'];
+            const p2Keys = ['arrowup', 'arrowleft', 'arrowdown', 'arrowright'];
+            const isP1Event = p1Keys.includes(key) && qteDodgeState.playerId === 1;
+            const isP2Event = p2Keys.includes(key) && qteDodgeState.playerId === 2;
+
+            if (isP1Event || isP2Event) {
+                e.preventDefault();
+                const expectedKey = qteDodgeState.sequence[qteDodgeState.currentIndex];
+
+                if (key === expectedKey) {
+                    const newIndex = qteDodgeState.currentIndex + 1;
+                    if (newIndex >= qteDodgeState.sequence.length) { // SUCCESS
+                        const player = qteDodgeState.playerId === 1 ? player1Ref.current : player2Ref.current!;
+                        const threat = qteDodgeState.entityType === 'projectile'
+                            ? bossProjectilesRef.current.find(p => p.id === qteDodgeState.triggeringEntityId)
+                            : enemiesRef.current.find(e => e.id === qteDodgeState.triggeringEntityId);
+
+                        if (threat) {
+                             if (threat.x < player.x) player.x += QTE_DODGE_DISTANCE;
+                             else player.x -= QTE_DODGE_DISTANCE;
+                        } else { player.x += QTE_DODGE_DISTANCE; }
+                        player.x = Math.max(0, Math.min(GAME_WIDTH - PLAYER_WIDTH, player.x));
+
+                        explosionsRef.current.push({
+                            id: `dodge-${player.id}-${Date.now()}`, x: player.x + PLAYER_WIDTH / 2, y: player.y + PLAYER_HEIGHT / 2, startTime: Date.now(), emoji: '✨'
+                        });
+                        
+                        const pulseCenter = { x: player.x + PLAYER_WIDTH / 2, y: player.y + PLAYER_HEIGHT / 2 };
+                        const projectilesToDestroy = new Set<string>();
+                        bossProjectilesRef.current.forEach(proj => {
+                            if (!proj.health && !proj.isStun) {
+                                const projCenter = { x: proj.x + proj.width / 2, y: proj.y + proj.height / 2 };
+                                if (((pulseCenter.x - projCenter.x)**2 + (pulseCenter.y - projCenter.y)**2) < AEGIS_RETALIATION_PULSE_RADIUS**2) {
+                                    projectilesToDestroy.add(proj.id);
+                                }
+                            }
+                        });
+
+
+                        if (qteDodgeState.entityType === 'projectile') {
+                             bossProjectilesRef.current = bossProjectilesRef.current.filter(p => p.id !== qteDodgeState.triggeringEntityId && !projectilesToDestroy.has(p.id));
+                        } else {
+                             enemiesRef.current = enemiesRef.current.filter(e => e.id !== qteDodgeState.triggeringEntityId);
+                             bossProjectilesRef.current = bossProjectilesRef.current.filter(p => !projectilesToDestroy.has(p.id));
+                        }
+                        setQteDodgeState(null);
+                    } else {
+                        setQteDodgeState(prev => prev ? { ...prev, currentIndex: newIndex } : null);
+                    }
+                } else { // FAILURE
+                    const damageReduction = equippedBoat.damageReduction || 0;
+                    const damageMultiplier = 1 - damageReduction;
+                    const finalDamage = HIT_DAMAGE * damageMultiplier;
+
+                    const playerToDamage = qteDodgeState.playerId === 1 ? 1 : 2;
+                    if (playerToDamage === 1) setPlayer1Hp(hp => Math.max(0, hp - finalDamage));
+                    else setPlayer2Hp(hp => Math.max(0, hp - finalDamage));
+
+                    if (qteDodgeState.entityType === 'projectile') {
+                        bossProjectilesRef.current = bossProjectilesRef.current.filter(p => p.id !== qteDodgeState.triggeringEntityId);
+                    } else {
+                        enemiesRef.current = enemiesRef.current.filter(e => e.id !== qteDodgeState.triggeringEntityId);
+                    }
+                    setQteDodgeState(null);
+                }
+            }
+            return;
+        }
+
         if (key === 'escape') { e.preventDefault(); onPause(); } 
         else if (key === 'q' && equippedGun) setP1Weapon(w => w === 'bomb' ? 'gun' : 'bomb');
         else if (key === '.' && isMultiplayer && equippedGun) setP2Weapon(w => w === 'bomb' ? 'gun' : 'bomb');
@@ -1092,7 +1337,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
     };
-  }, [onPause, isMultiplayer, equippedGun, handleUsePowerUp]);
+  }, [onPause, isMultiplayer, equippedGun, handleUsePowerUp, qteDodgeState, equippedBoat]);
   
   useEffect(() => {
     if(boss && boss.type === '👵' && !bossInsult && !isLoadingInsult){
@@ -1126,11 +1371,14 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
               }}
             >
               <HUD 
-                score={score1} score2={score2} isMultiplayer={isMultiplayer} lives={lives} level={level} 
+                score={score1} score2={score2} isMultiplayer={isMultiplayer} level={level} 
                 currency={currentRunCurrency} boss={boss && isBossActive ? boss : null} onPause={onPause}
                 p1Weapon={p1Weapon} p1Ammo={p1Ammo} p2Weapon={p2Weapon} p2Ammo={p2Ammo}
                 equippedGun={equippedGun} playerLevel={playerLevel} xp={playerXp + currentRunXp}
-                xpForNextLevel={xpForNextLevel} equippedPowerUpId={equippedPowerUpId} powerUpCount={powerUpCount}
+                xpForNextLevel={xpForNextLevel} 
+                p1Hp={player1Hp} p1MaxHp={player1MaxHp}
+                p2Hp={player2Hp} p2MaxHp={player2MaxHp}
+                equippedPowerUpId={equippedPowerUpId} powerUpCount={powerUpCount}
                 isInvincible={isInvincible} rapidFireTimeLeft={rapidFireTimeLeft}
                 timeSlowTimeLeft={timeSlowTimeLeft} goldRushTimeLeft={goldRushTimeLeft}
               />

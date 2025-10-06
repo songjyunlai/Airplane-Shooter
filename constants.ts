@@ -1,4 +1,4 @@
-import { LevelConfig, Plane, BombType, Rarity, GunType, PowerUp } from './types';
+import { LevelConfig, Boat, BombType, Rarity, GunType, PowerUp } from './types';
 
 export const GAME_WIDTH = 800;
 export const GAME_HEIGHT = 600;
@@ -6,7 +6,9 @@ export const GAME_HEIGHT = 600;
 export const PLAYER_WIDTH = 50;
 export const PLAYER_HEIGHT = 50;
 export const PLAYER_SPEED = 7;
-export const PLAYER_LIVES = 3;
+export const PLAYER_BASE_HP = 100;
+export const HIT_DAMAGE = 25;
+
 
 export const DRONE_WIDTH = 30;
 export const DRONE_HEIGHT = 30;
@@ -60,6 +62,8 @@ export const AMMO_DROP_BASE_AMOUNT = 20;
 // Fix: Add width and height for ammo drops to enable collision detection.
 export const AMMO_DROP_WIDTH = 30;
 export const AMMO_DROP_HEIGHT = 30;
+export const CURRENCY_DROP_WIDTH = 30;
+export const CURRENCY_DROP_HEIGHT = 30;
 
 // --- NEW LEVEL SYSTEM ---
 export const ENEMY_XP_DROP = 15;
@@ -72,15 +76,22 @@ export const INVINCIBILITY_DURATION = 5000; // ms
 export const RAPID_FIRE_DURATION = 10000; // ms
 export const TIME_SLOW_DURATION = 8000; // ms
 export const GOLD_RUSH_DURATION = 15000; // ms
-export const AUTO_DODGE_COOLDOWN = 750; // ms
-export const AUTO_DODGE_DISTANCE = 80; // pixels
-export const AUTO_DODGE_DANGER_RADIUS = 120; // pixels
+export const QTE_DODGE_DANGER_RADIUS = 30; // pixels
+export const QTE_DODGE_COOLDOWN = 5000; // ms
+export const QTE_DODGE_SLOW_MO_DURATION = 2000; // ms
+export const QTE_DODGE_SLOW_MO_FACTOR = 0.25;
+export const QTE_DODGE_SEQUENCE_LENGTH = 4;
+export const QTE_DODGE_DISTANCE = 100; // pixels
 
-// --- AEGIS INTERCEPTOR UPGRADES ---
+// --- AI SHIP UPGRADES ---
 export const AEGIS_LASER_COOLDOWN = 400; // ms
 export const AEGIS_LASER_DAMAGE = 0.5;
 export const AEGIS_RETALIATION_PULSE_RADIUS = 75; // pixels
 export const AEGIS_CURRENCY_BONUS = 1.1; // 10% bonus
+
+// --- SPECIAL BOAT ABILITIES ---
+export const BATTLESHIP_SIDE_CANNON_COOLDOWN = 1000; // ms
+export const BLACK_HOLE_DIRECT_DAMAGE_MODIFIER = 0.1; // Takes only 10% damage
 
 
 export const POWER_UPS: PowerUp[] = [
@@ -90,6 +101,7 @@ export const POWER_UPS: PowerUp[] = [
     { id: 'pw4', name: 'Chrono Field', emoji: '⏳', cost: 350, rarity: 'Rare', description: 'Slows enemies & projectiles for 8 seconds.', quantityPerDrop: 3 },
     { id: 'pw5', name: 'Gold Rush', emoji: '💰', cost: 500, rarity: 'Epic', description: 'Doubles currency drops for 15 seconds.', quantityPerDrop: 2 },
     { id: 'pw6', name: 'Wingman Drone', emoji: '🤖', cost: 750, rarity: 'Epic', description: 'Spawns a drone that fights with you.', quantityPerDrop: 1 },
+    { id: 'pw7', name: 'Repair Kit', emoji: '🔧', cost: 350, rarity: 'Rare', description: 'Restores 50% of your max HP.', quantityPerDrop: 2 },
 ];
 
 
@@ -100,12 +112,12 @@ export const RARITY_COLORS: { [key in Rarity]: string } = {
     Legendary: 'border-yellow-500',
 };
 
-export const PLANES: Plane[] = [
-    { id: 'p1', name: 'Heroplane', emoji: '✈️', cost: 0, rarity: 'Common', description: 'The reliable classic.'},
-    { id: 'p2', name: 'Stealth Jet', emoji: '🚀', cost: 500, rarity: 'Rare', description: 'A faster, sleeker model.'},
-    { id: 'p3', name: 'UFO', emoji: '🛸', cost: 1500, rarity: 'Epic', description: 'Alien tech for ultimate power.' },
-    { id: 'p4', name: 'Cosmic Ghost', emoji: '👻', rarity: 'Legendary', findInSupplyDropOnly: true, description: 'A mysterious and powerful specter.' },
-    { id: 'p5', name: 'Aegis Interceptor', emoji: '⚜️', cost: 0, rarity: 'Legendary', description: 'AI auto-dodge with retaliation pulse, integrated twin lasers, and a 10% currency bonus.' },
+export const BOATS: Boat[] = [
+    { id: 'p1', name: 'Hero Boat', emoji: '🚤', cost: 0, rarity: 'Common', description: 'The reliable classic.', hpMultiplier: 1.0 },
+    { id: 'p2', name: 'Stealth Ship', emoji: '🛥️', cost: 500, rarity: 'Rare', description: 'Equipped with a passive shield that reduces all incoming damage by 20%.', hpMultiplier: 1.2, damageReduction: 0.2 },
+    { id: 'p3', name: 'Battleship', emoji: '🚢', cost: 1500, rarity: 'Epic', description: 'Fires additional projectiles from its side cannons.', hpMultiplier: 1.5 },
+    { id: 'p4', name: 'Ghost Ship', emoji: '⛵️', rarity: 'Legendary', findInSupplyDropOnly: true, description: 'A mysterious and powerful specter.', hpMultiplier: 2.0 },
+    { id: 'p5', name: 'AI Ship', emoji: '🛰️', cost: 0, rarity: 'Legendary', description: 'Evade attacks with a timed key sequence to trigger a counter-pulse.', hpMultiplier: 3.0 },
 ];
 
 export const BOMBS: BombType[] = [
@@ -136,6 +148,7 @@ export const LOOT_POOL: { id: string; weight: number }[] = [
     { id: 'pw1', weight: 60 },
     { id: 'pw3', weight: 55 },
     { id: 'pw4', weight: 50 },
+    { id: 'pw7', weight: 45 },
     // Epic
     { id: 'p3', weight: 20 },
     { id: 'b3', weight: 20 },
