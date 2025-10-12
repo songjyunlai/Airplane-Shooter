@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { LEVEL_CONFIGS } from '../constants';
 
@@ -15,9 +16,9 @@ const LevelSelectionScreen: React.FC<LevelSelectionScreenProps> = ({ onSelectLev
           <div
             key={levelConfig.level}
             onClick={() => onSelectLevel(levelConfig.level)}
-            className="flex flex-col items-center justify-between p-4 bg-gray-800/50 rounded-lg border-2 border-cyan-700/50 cursor-pointer transform transition-transform duration-200 hover:scale-105 hover:border-cyan-400"
+            className="flex flex-col items-center justify-between p-4 bg-gray-800/50 rounded-lg border-2 transform transition-all duration-200 border-cyan-700/50 cursor-pointer hover:scale-105 hover:border-cyan-400"
           >
-            <h3 className="text-xl font-bold text-cyan-400 mb-2">Lvl {levelConfig.level}</h3>
+            <h3 className="text-xl font-bold mb-2 text-cyan-400">Lvl {levelConfig.level}</h3>
             <div className="text-5xl my-3 flex items-center justify-center h-16">
               <span>{levelConfig.boss.type}</span>
             </div>

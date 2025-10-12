@@ -196,3 +196,10 @@ export interface QTEDodgeState {
   triggeringEntityId: string;
   entityType: 'enemy' | 'projectile';
 }
+
+export interface Settings {
+  masterVolume: number;
+  musicVolume: number;
+  sfxVolume: number;
+  showMobileControls: boolean;
+}

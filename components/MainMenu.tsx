@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface MainMenuProps {
@@ -5,6 +6,7 @@ interface MainMenuProps {
   onGoToShop: () => void;
   onGoToSupplyDrop: () => void;
   onStartMultiplayer: () => void;
+  onGoToSettings: () => void;
   onResetProgress: () => void;
   currency: number;
   playerLevel: number;
@@ -12,7 +14,7 @@ interface MainMenuProps {
   xpForNextLevel: number;
 }
 
-const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onGoToShop, onGoToSupplyDrop, onStartMultiplayer, onResetProgress, currency, playerLevel, playerXp, xpForNextLevel }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onGoToShop, onGoToSupplyDrop, onStartMultiplayer, onGoToSettings, onResetProgress, currency, playerLevel, playerXp, xpForNextLevel }) => {
   const xpPercentage = (playerXp / xpForNextLevel) * 100;
   
   return (
@@ -20,6 +22,13 @@ const MainMenu: React.FC<MainMenuProps> = ({ onStartGame, onGoToShop, onGoToSupp
       <div className="absolute top-4 right-4 bg-yellow-400 text-gray-900 font-bold px-4 py-2 rounded-full text-lg">
         💰 {currency}
       </div>
+      <button
+        onClick={onGoToSettings}
+        className="absolute top-4 left-4 text-3xl transform transition-transform duration-200 hover:scale-110 hover:rotate-90 focus:outline-none"
+        aria-label="Settings"
+      >
+        ⚙️
+      </button>
        <div className="w-full text-center mb-4">
         <h3 className="text-xl font-bold text-yellow-300">Level {playerLevel}</h3>
         <div className="w-full bg-gray-700 rounded-full h-4 my-1 border-2 border-gray-600">

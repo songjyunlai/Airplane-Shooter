@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Player, Bomb, Enemy, Boss, BossProjectile, Explosion, Position, WeaponSelection, Bullet, AmmoDrop, Drone, QTEDodgeState, CurrencyDrop } from '../types';
+import { Player, Bomb, Enemy, Boss, BossProjectile, Explosion, Position, WeaponSelection, Bullet, AmmoDrop, Drone, QTEDodgeState, CurrencyDrop, Settings } from '../types';
 import {
   GAME_WIDTH,
   GAME_HEIGHT,
@@ -66,7 +67,7 @@ import {
 } from '../constants';
 import HUD from './HUD';
 import { generateInsult } from '../services/geminiService';
-import { sounds } from '../assets';
+import { audioManager } from '../utils/audioManager';
 import MobileControls from './MobileControls';
 
 interface GameProps {
@@ -84,6 +85,7 @@ interface GameProps {
   xpForNextLevel: number;
   equippedPowerUpId: string | null;
   ownedPowerUps: { [key: string]: number };
+  settings: Settings;
 }
 
 const BOSS_PROJECTILE_MAP: { [key: string]: string } = {
@@ -99,7 +101,7 @@ const EXPLOSION_DURATION = 400;
 
 const ALL_BOSS_TYPES_FOR_RANDOM = LEVEL_CONFIGS.map(l => l.boss.type).slice(0, 28); // All bosses except ? and black hole
 
-const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGameWon, equippedBoatId, equippedBombId, equippedGunId, isPaused, onPause, playerLevel, playerXp, xpForNextLevel, equippedPowerUpId, ownedPowerUps }) => {
+const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGameWon, equippedBoatId, equippedBombId, equippedGunId, isPaused, onPause, playerLevel, playerXp, xpForNextLevel, equippedPowerUpId, ownedPowerUps, settings }) => {
   const equippedBoat = BOATS.find(p => p.id === equippedBoatId)!;
   const equippedBomb = BOMBS.find(b => b.id === equippedBombId)!;
   const equippedGun = equippedGunId ? GUNS.find(g => g.id === equippedGunId) : null;
@@ -114,7 +116,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     y: GAME_HEIGHT - PLAYER_HEIGHT - 20, width: PLAYER_WIDTH, height: PLAYER_HEIGHT,
   }), []);
 
-  // Use refs for high-frequency update game objects to prevent re-renders
   const player1Ref = useRef<Player>(createPlayer(1));
   const player2Ref = useRef<Player | null>(isMultiplayer ? createPlayer(2) : null);
   const bombsRef = useRef<Bomb[]>([]);
@@ -127,14 +128,12 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const droneRef = useRef<Drone | null>(null);
   const droneBulletsRef = useRef<Bullet[]>([]);
 
-  // Use state for low-frequency updates that affect the HUD or core game state
   const [level, setLevel] = useState(startLevel);
   const [score1, setScore1] = useState(0);
   const [score2, setScore2] = useState(0);
   const [currentRunCurrency, setCurrentRunCurrency] = useState(0);
   const [currentRunXp, setCurrentRunXp] = useState(0);
   
-  // New Health System State
   const [player1Hp, setPlayer1Hp] = useState(100);
   const [player1MaxHp, setPlayer1MaxHp] = useState(100);
   const [isPlayer1Dead, setIsPlayer1Dead] = useState(false);
@@ -153,7 +152,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const [p2Weapon, setP2Weapon] = useState<WeaponSelection>('bomb');
   const [p2Ammo, setP2Ammo] = useState(equippedGun?.maxAmmo || 0);
   const [powerUpCount, setPowerUpCount] = useState(0);
-  // Power-up states
   const [isInvincible, setIsInvincible] = useState(false);
   const [isRapidFire, setIsRapidFire] = useState(false);
   const [rapidFireEndTime, setRapidFireEndTime] = useState(0);
@@ -163,7 +161,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const [goldRushEndTime, setGoldRushEndTime] = useState(0);
   const [qteDodgeState, setQteDodgeState] = useState<QTEDodgeState | null>(null);
 
-  // Player Debuffs
   const [isPlayer1Slowed, setIsPlayer1Slowed] = useState(false);
   const slowTimeoutP1 = useRef<number | null>(null);
   const [isPlayer1ControlsReversed, setIsPlayer1ControlsReversed] = useState(false);
@@ -196,6 +193,22 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   const stunTimeoutP1 = useRef<number | null>(null);
   const stunTimeoutP2 = useRef<number | null>(null);
 
+  useEffect(() => {
+    audioManager.playMusic();
+    return () => {
+      audioManager.stopMusic();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isPaused) {
+        audioManager.pauseMusic();
+    } else {
+        audioManager.playMusic();
+    }
+  }, [isPaused]);
+
+
   const resetAllPlayerDebuffs = useCallback(() => {
     setIsPlayer1Slowed(false); if (slowTimeoutP1.current) clearTimeout(slowTimeoutP1.current);
     setIsPlayer1ControlsReversed(false); if (controlsReversedTimeoutP1.current) clearTimeout(controlsReversedTimeoutP1.current);
@@ -213,7 +226,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     if (equippedPowerUpId) setPowerUpCount(ownedPowerUps[equippedPowerUpId] || 0);
   }, [equippedPowerUpId, ownedPowerUps]);
 
-  // Initialize player health based on equipped boat
   useEffect(() => {
     const boat = BOATS.find(p => p.id === equippedBoatId)!;
     const maxHp = PLAYER_BASE_HP * boat.hpMultiplier;
@@ -226,17 +238,18 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         setPlayer2Hp(maxHp);
         setIsPlayer2Dead(false);
     }
-  }, [equippedBoatId, isMultiplayer, startLevel]); // Rerun on startLevel change to reset for new game
+  }, [equippedBoatId, isMultiplayer, startLevel]);
 
-  // Game Over logic
   useEffect(() => {
       if (player1Hp <= 0 && !isPlayer1Dead) {
           setIsPlayer1Dead(true);
+          audioManager.playSfx('explosion');
           explosionsRef.current.push({ id: `player1-death`, x: player1Ref.current.x, y: player1Ref.current.y, startTime: Date.now(), emoji: '☠️' });
-          player1Ref.current.x = -2000; // Move offscreen
+          player1Ref.current.x = -2000;
       }
       if (isMultiplayer && player2Hp <= 0 && !isPlayer2Dead) {
           setIsPlayer2Dead(true);
+          audioManager.playSfx('explosion');
           explosionsRef.current.push({ id: `player2-death`, x: player2Ref.current.x!, y: player2Ref.current.y!, startTime: Date.now(), emoji: '☠️' });
           if(player2Ref.current) player2Ref.current.x = -2000;
       }
@@ -249,7 +262,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     if (p1IsOutOfGame && p2IsOutOfGame && gameLoopRef.current) {
         if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
         gameLoopRef.current = null;
-        setTimeout(() => { // Delay to show final explosion
+        setTimeout(() => {
              onGameOver({ p1: score1, p2: isMultiplayer ? score2 : undefined }, currentRunXp, powerUpCount, currentRunCurrency);
         }, 1000);
     }
@@ -272,7 +285,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     player1Ref.current = createPlayer(1);
     if(isMultiplayer) player2Ref.current = createPlayer(2);
 
-    // Reset timed power-ups
     setIsTimeSlow(false); setTimeSlowEndTime(0);
     setIsGoldRush(false); setGoldRushEndTime(0);
     setIsRapidFire(false); setRapidFireEndTime(0);
@@ -302,7 +314,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     const powerUp = POWER_UPS.find(p => p.id === equippedPowerUpId);
     if (!powerUp) return;
 
-    new Audio(sounds.powerUp).play();
+    audioManager.playSfx('powerUp');
     setPowerUpCount(c => c - 1);
 
     switch (powerUp.id) {
@@ -338,6 +350,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             startTime: Date.now(),
             emoji: '💥',
           }));
+          audioManager.playSfx('explosion');
         }
         enemiesRef.current = [];
         break;
@@ -383,7 +396,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
 
     const now = Date.now();
     
-    // Draw Game Objects
     ctx.textBaseline = 'top';
     
     ctx.font = '40px sans-serif';
@@ -396,12 +408,10 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     ctx.font = '24px sans-serif';
     bombsRef.current.forEach(b => ctx.fillText(b.emoji, b.x, b.y));
 
-    // Player bullets
     ctx.font = '38px sans-serif';
-    ctx.fillStyle = '#fef08a'; // yellow-300
+    ctx.fillStyle = '#fef08a';
     bulletsRef.current.forEach(b => ctx.fillText(b.emoji, b.x, b.y));
-    // Drone bullets
-    ctx.fillStyle = '#a78bfa'; // violet-400
+    ctx.fillStyle = '#a78bfa';
     droneBulletsRef.current.forEach(b => ctx.fillText(b.emoji, b.x, b.y));
     ctx.fillStyle = 'white';
     
@@ -426,7 +436,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
       }
       ctx.fillText(boss.type, boss.x, boss.y);
       ctx.restore();
-       // Draw shockwave for Gorilla
       if (boss.powerUp?.active && boss.powerUp.type === 'GORILLA_POUND') {
         const elapsed = now - boss.powerUp.startTime;
         const progress = elapsed / BOSS_POWER_UP_DURATIONS.GORILLA_POUND;
@@ -436,7 +445,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             ctx.fillRect(GAME_WIDTH * (1 - progress), GAME_HEIGHT - 30, GAME_WIDTH * progress, 30);
         }
       }
-      // Draw sub-entities
       boss.subEntities?.forEach(sub => {
         const fontSize = sub.type === '🐺' ? '30px' : '40px';
         ctx.font = `${fontSize} sans-serif`;
@@ -444,13 +452,11 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
       });
     }
 
-    // Draw Drone
     if (droneRef.current) {
         ctx.font = '30px sans-serif';
         ctx.fillText(droneRef.current.emoji, droneRef.current.x, droneRef.current.y);
     }
     
-    // Player 1
     if (!isPlayer1Dead) {
         ctx.save();
         ctx.font = '48px sans-serif';
@@ -469,7 +475,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         if (isPlayer1ControlsReversed) ctx.fillText('❓', player1Ref.current.x + 12, player1Ref.current.y - 10);
     }
     
-    // Player 2
     if(isMultiplayer && player2Ref.current && !isPlayer2Dead) {
         ctx.save();
         ctx.font = '48px sans-serif';
@@ -510,7 +515,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             const timeRemaining = 1 - (timeElapsed / QTE_DODGE_SLOW_MO_DURATION);
             ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
             ctx.fillRect(displayX - 80, displayY + 40, 160, 10);
-            ctx.fillStyle = '#fef08a'; // yellow-300
+            ctx.fillStyle = '#fef08a';
             ctx.fillRect(displayX - 80, displayY + 40, 160 * timeRemaining, 10);
             
             ctx.font = '40px sans-serif';
@@ -522,7 +527,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
                 };
                 
                 if (index < qteDodgeState.currentIndex) {
-                    ctx.fillStyle = '#4ade80'; // green-400
+                    ctx.fillStyle = '#4ade80';
                 } else {
                     ctx.fillStyle = 'white';
                 }
@@ -547,7 +552,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     const damageMultiplier = 1 - damageReduction;
 
     if (qteDodgeState && now > qteDodgeState.startTime + QTE_DODGE_SLOW_MO_DURATION) {
-        // FAILURE due to timeout
         const playerToDamage = qteDodgeState.playerId === 1 ? 1 : 2;
         const finalDamage = HIT_DAMAGE * damageMultiplier;
         if (playerToDamage === 1) setPlayer1Hp(hp => Math.max(0, hp - finalDamage));
@@ -561,11 +565,9 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         setQteDodgeState(null);
     }
 
-    // --- Gravity effects ---
     const blackHole = currentBoss?.type === '⚫️' ? currentBoss : null;
     const galaxy = currentBoss?.type === '🌌' ? currentBoss : null;
 
-    // --- Player Movement ---
     const updatePlayerPosition = (player: Player, keys: { left: string, right: string, up: string, down: string }, pushForce: typeof player1PushForce.current, isSlowed: boolean, isReversed: boolean) => {
         let speed = isSlowed ? PLAYER_SPEED * 0.5 : PLAYER_SPEED;
         
@@ -588,7 +590,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             const dx = blackHole.x + BOSS_WIDTH / 2 - (player.x + PLAYER_WIDTH / 2);
             const dy = blackHole.y + BOSS_HEIGHT / 2 - (player.y + PLAYER_HEIGHT / 2);
             const distSq = dx * dx + dy * dy;
-            if (distSq > 1 && distSq < 400 * 400) { // Only apply force within a radius
+            if (distSq > 1 && distSq < 400 * 400) {
                 const dist = Math.sqrt(distSq);
                 const force = Math.min(4, 800 / distSq);
                 player.x += (dx / dist) * force;
@@ -613,7 +615,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         updatePlayerPosition(player2Ref.current, { left: 'arrowleft', right: 'arrowright', up: 'arrowup', down: 'arrowdown'}, player2PushForce.current, isPlayer2Slowed, isPlayer2ControlsReversed);
     }
    
-    // --- Object Updates ---
     const applyGravity = (obj: {x:number, y:number}) => {
         if (blackHole) {
             const dx = blackHole.x + BOSS_WIDTH / 2 - obj.x;
@@ -664,7 +665,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         });
     explosionsRef.current = explosionsRef.current.filter(exp => (now - exp.startTime) < EXPLOSION_DURATION);
 
-    // --- Drone Logic ---
     if (droneRef.current) {
         const targetX = player1Ref.current.x - (DRONE_WIDTH + 10);
         const targetY = player1Ref.current.y;
@@ -675,7 +675,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             droneRef.current.lastFireTime = now;
             droneBulletsRef.current.push({
                 id: `dbullet-${now}`,
-                playerId: 1, // Counts for P1 score
+                playerId: 1,
                 x: droneRef.current.x + DRONE_WIDTH / 2 - BULLET_WIDTH / 2,
                 y: droneRef.current.y,
                 width: BULLET_WIDTH,
@@ -686,7 +686,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         }
     }
 
-    // --- Shooting Logic ---
     const bombDamage = equippedBomb.damage * damageBonus;
     const gunDamage = equippedGun ? equippedGun.damage * damageBonus : 0;
     const fireRateMultiplier = isRapidFire ? 2 : 1;
@@ -698,11 +697,13 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             lastFireTimeRef.current = now;
             const commonBombProps = { playerId: player.playerId, y: player.y, width: BOMB_WIDTH, height: BOMB_HEIGHT, damage: bombDamage, emoji: equippedBomb.emoji };
             bombsRef.current.push({ ...commonBombProps, id: `b-${now}-p${player.playerId}`, x: player.x + PLAYER_WIDTH/2 - BOMB_WIDTH/2 });
+            audioManager.playSfx('shoot');
             return true;
         } else if (weapon === 'gun' && equippedGun && ammo > 0 && now - lastFireTimeRef.current > GUN_COOLDOWN / fireRateMultiplier) {
             lastFireTimeRef.current = now;
             bulletsRef.current.push({ id: `bu-${now}-p${player.playerId}`, playerId: player.playerId, x: player.x + PLAYER_WIDTH/2 - BULLET_WIDTH/2, y: player.y, width: BULLET_WIDTH, height: BULLET_HEIGHT, damage: gunDamage, emoji: equippedGun.emoji });
             setAmmo(a => a - 1);
+            audioManager.playSfx('shoot');
             return true;
         }
         return false;
@@ -715,7 +716,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         fireWeapon(player2Ref, lastFireTimeP2, p2Weapon, setP2Ammo, p2Ammo);
     }
 
-    // Battleship side cannons
     if (equippedBoatId === 'p3') {
         if (now - lastSideCannonTimeP1.current > BATTLESHIP_SIDE_CANNON_COOLDOWN && !isPlayer1Dead) {
             lastSideCannonTimeP1.current = now;
@@ -729,7 +729,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         }
     }
 
-    // AI Ship Integrated Lasers
     if (equippedBoatId === 'p5') {
         if (now - lastAegisLaserTimeP1.current > AEGIS_LASER_COOLDOWN && !isPlayer1Dead) {
             lastAegisLaserTimeP1.current = now;
@@ -743,7 +742,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         }
     }
     
-    // --- Boss Logic ---
     if (isBossActive && currentBoss) {
         if (currentBoss.powerUp?.active && now > currentBoss.powerUp.endTime) {
             currentBoss.powerUp.active = false;
@@ -795,7 +793,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
        }
         
        if (currentBoss.powerUp?.active && currentBoss.powerUp.type === 'DRAGON_BREATH') {
-            if (now % 100 < 50) { // Throttle projectile creation
+            if (now % 100 < 50) {
                 const sweepAngle = Math.sin(now * 0.001) * (Math.PI / 4);
                 bossProjectilesRef.current.push({ id: `bproj-breath-${now}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT, width: 15, height: 15, dx: Math.sin(sweepAngle) * BOSS_PROJECTILE_SPEED, dy: Math.cos(sweepAngle) * BOSS_PROJECTILE_SPEED, lifetime: 800 });
             }
@@ -817,7 +815,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             const target = bossTargetRef.current; const dirX = target.x - currentBoss.x; const dirY = target.y - currentBoss.y; const len = Math.sqrt(dirX * dirX + dirY * dirY);
             if (len > BOSS_SPEED) { currentBoss.x += (dirX / len) * BOSS_SPEED * speedMultiplier; currentBoss.y += (dirY / len) * BOSS_SPEED * speedMultiplier; } else { currentBoss.x = target.x; currentBoss.y = target.y; }
         } else if (['🧙', '🏺', '⚫️'].includes(currentBoss.type)) {
-            // Stationary or special movement bosses
         } else if (currentBoss.type === '🐺') {
             const targetX = player1Ref.current.x;
             if (Math.abs(targetX - currentBoss.x) > PLAYER_WIDTH) {
@@ -842,34 +839,126 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             const baseProjectile = { y: currentBoss.y + BOSS_HEIGHT, width: BOSS_PROJECTILE_WIDTH, height: BOSS_PROJECTILE_HEIGHT, createdAt: now };
 
             const executeAttack = (attackType: string) => {
+                let targetPlayer: Player | null = null;
+                const canTargetP1 = !isPlayer1Dead;
+                const canTargetP2 = isMultiplayer && player2Ref.current && !isPlayer2Dead;
+                if (canTargetP1 && canTargetP2) { targetPlayer = Math.random() < 0.5 ? player1Ref.current : player2Ref.current!; }
+                else if (canTargetP1) { targetPlayer = player1Ref.current; }
+                else if (canTargetP2) { targetPlayer = player2Ref.current!; }
+
                 switch (attackType) {
-                    case '🐙': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2, }); break;
-                    case '🦈': for (let i = -1; i <= 1; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: i * (BOSS_PROJECTILE_SPEED * 0.5), dy: BOSS_PROJECTILE_SPEED, }); break;
-                    case '🦀': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-1`, x: currentBoss.x + 10 }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: currentBoss.x + BOSS_WIDTH - BOSS_PROJECTILE_WIDTH - 10 }); break;
-                    case '🐡': { 
-                        let targetPlayerPuffer: Player | null = null;
-                        const canTargetP1 = !isPlayer1Dead;
-                        const canTargetP2 = isMultiplayer && player2Ref.current && !isPlayer2Dead;
-
-                        if (canTargetP1 && canTargetP2) {
-                            targetPlayerPuffer = Math.random() < 0.5 ? player1Ref.current : player2Ref.current!;
-                        } else if (canTargetP1) {
-                            targetPlayerPuffer = player1Ref.current;
-                        } else if (canTargetP2) {
-                            targetPlayerPuffer = player2Ref.current!;
+                    case '🐙': {
+                        if (targetPlayer) {
+                            const pCenterX = targetPlayer.x + PLAYER_WIDTH / 2;
+                            const bCenterX = currentBoss.x + BOSS_WIDTH / 2;
+                            const dirX = pCenterX - bCenterX;
+                            const dirY = (targetPlayer.y + PLAYER_HEIGHT / 2) - (currentBoss.y + BOSS_HEIGHT / 2);
+                            const len = Math.sqrt(dirX * dirX + dirY * dirY);
+                            if (len > 0) {
+                                projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-homing`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: (dirX / len) * BOSS_PROJECTILE_SPEED, dy: (dirY / len) * BOSS_PROJECTILE_SPEED });
+                            }
+                        } else {
+                            projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2 });
                         }
-
-                        if(targetPlayerPuffer) {
-                            const pCenterX_p = targetPlayerPuffer.x + PLAYER_WIDTH / 2; const bCenterX_p = currentBoss.x + BOSS_WIDTH / 2; const dirX_p = pCenterX_p - bCenterX_p; const dirY_p = (targetPlayerPuffer.y + PLAYER_HEIGHT / 2) - (currentBoss.y + BOSS_HEIGHT / 2); const len_p = Math.sqrt(dirX_p * dirX_p + dirY_p * dirY_p); if (len_p > 0) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-homing`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: (dirX_p / len_p) * BOSS_PROJECTILE_SPEED, dy: (dirY_p / len_p) * BOSS_PROJECTILE_SPEED, });
+                        break;
+                    }
+                    case '🦈': {
+                        if (targetPlayer) {
+                            const pCenterX = targetPlayer.x + PLAYER_WIDTH / 2;
+                            const bCenterX = currentBoss.x + BOSS_WIDTH / 2;
+                            const dirX = pCenterX - bCenterX;
+                            const dirY = (targetPlayer.y + PLAYER_HEIGHT / 2) - (currentBoss.y + BOSS_HEIGHT / 2);
+                            const len = Math.sqrt(dirX * dirX + dirY * dirY);
+                            if (len > 0) {
+                                const mainDx = (dirX / len) * BOSS_PROJECTILE_SPEED;
+                                const mainDy = (dirY / len) * BOSS_PROJECTILE_SPEED;
+                                const spreadAngle = 0.4;
+                                projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-0`, x: currentBoss.x + BOSS_WIDTH / 2, dx: mainDx, dy: mainDy });
+                                const dx1 = mainDx * Math.cos(spreadAngle) - mainDy * Math.sin(spreadAngle);
+                                const dy1 = mainDx * Math.sin(spreadAngle) + mainDy * Math.cos(spreadAngle);
+                                projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-1`, x: currentBoss.x + BOSS_WIDTH / 2, dx: dx1, dy: dy1 });
+                                const dx2 = mainDx * Math.cos(-spreadAngle) - mainDy * Math.sin(-spreadAngle);
+                                const dy2 = mainDx * Math.sin(-spreadAngle) + mainDy * Math.cos(-spreadAngle);
+                                projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: currentBoss.x + BOSS_WIDTH / 2, dx: dx2, dy: dy2 });
+                            }
+                        } else {
+                             for (let i = -1; i <= 1; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, dx: i * (BOSS_PROJECTILE_SPEED * 0.5), dy: BOSS_PROJECTILE_SPEED, });
                         }
-                        break; 
+                        break;
+                    }
+                    case '🦀': {
+                        if (targetPlayer) {
+                            const pCenterX = targetPlayer.x + PLAYER_WIDTH / 2;
+                            const pCenterY = targetPlayer.y + PLAYER_HEIGHT / 2;
+                            const bLeftX = currentBoss.x + 10;
+                            const dirX1 = pCenterX - bLeftX;
+                            const dirY1 = pCenterY - (currentBoss.y + BOSS_HEIGHT / 2);
+                            const len1 = Math.sqrt(dirX1*dirX1 + dirY1*dirY1);
+                            if (len1 > 0) {
+                                 projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-1`, x: bLeftX, dx: (dirX1 / len1) * BOSS_PROJECTILE_SPEED, dy: (dirY1 / len1) * BOSS_PROJECTILE_SPEED });
+                            }
+                            const bRightX = currentBoss.x + BOSS_WIDTH - BOSS_PROJECTILE_WIDTH - 10;
+                            const dirX2 = pCenterX - bRightX;
+                            const dirY2 = pCenterY - (currentBoss.y + BOSS_HEIGHT / 2);
+                            const len2 = Math.sqrt(dirX2*dirX2 + dirY2*dirY2);
+                             if (len2 > 0) {
+                                 projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: bRightX, dx: (dirX2 / len2) * BOSS_PROJECTILE_SPEED, dy: (dirY2 / len2) * BOSS_PROJECTILE_SPEED });
+                            }
+                        } else {
+                            projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-1`, x: currentBoss.x + 10 });
+                            projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: currentBoss.x + BOSS_WIDTH - BOSS_PROJECTILE_WIDTH - 10 });
+                        }
+                        break;
+                    }
+                    case '🐡': {
+                        if (targetPlayer) {
+                            const pCenterX = targetPlayer.x + PLAYER_WIDTH / 2;
+                            const bCenterX = currentBoss.x + BOSS_WIDTH / 2;
+                            const dirX = pCenterX - bCenterX;
+                            const dirY = (targetPlayer.y + PLAYER_HEIGHT / 2) - (currentBoss.y + BOSS_HEIGHT / 2);
+                            const len = Math.sqrt(dirX * dirX + dirY * dirY);
+                            if (len > 0) {
+                                const mainDx = (dirX / len) * BOSS_PROJECTILE_SPEED;
+                                const mainDy = (dirY / len) * BOSS_PROJECTILE_SPEED;
+                                const spreadAngle = 0.2; // radians for spread
+
+                                // Fires a 5-shot spread instead of a single projectile
+                                for (let i = -2; i <= 2; i++) {
+                                    const angle = i * spreadAngle;
+                                    const dx = mainDx * Math.cos(angle) - mainDy * Math.sin(angle);
+                                    const dy = mainDx * Math.sin(angle) + mainDy * Math.cos(angle);
+                                    projectilesToCreate.push({
+                                        ...baseProjectile,
+                                        id: `bproj-${now}-${i}`,
+                                        x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2,
+                                        dx,
+                                        dy,
+                                    });
+                                }
+                            }
+                        }
+                        break;
                     }
                     case '🦞': for (let i = 0; i < 3; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2 - BOSS_PROJECTILE_WIDTH / 2, y: baseProjectile.y + (i * 40), dy: BOSS_PROJECTILE_SPEED * 1.2, }); break;
                     case '🐚': for (let i = 0; i < 2; i++) { const angle = (snakeShotCounter.current / 8) * (2 * Math.PI) + (i * Math.PI); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.cos(angle) * BOSS_PROJECTILE_SPEED, dy: Math.sin(angle) * BOSS_PROJECTILE_SPEED, }); } snakeShotCounter.current++; break;
                     case '🦪': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-mid`, x: currentBoss.x + BOSS_WIDTH / 2, dy: BOSS_PROJECTILE_SPEED * 0.7 }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-left`, x: currentBoss.x, dy: BOSS_PROJECTILE_SPEED * 1.4 }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-right`, x: currentBoss.x + BOSS_WIDTH - BOSS_PROJECTILE_WIDTH, dy: BOSS_PROJECTILE_SPEED * 1.4 }); break;
                     case '🦑': for (let i = 0; i < 8; i++) { const angle = (i / 8) * 2 * Math.PI; projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.cos(angle) * BOSS_PROJECTILE_SPEED, dy: Math.sin(angle) * BOSS_PROJECTILE_SPEED, }); } break;
                     case '🐍': snakeShotCounter.current = (snakeShotCounter.current + 1); const wave = Math.sin(snakeShotCounter.current * 0.3) * (GAME_WIDTH / 3); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-1`, x: currentBoss.x + BOSS_WIDTH / 2 + wave }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: currentBoss.x + BOSS_WIDTH / 2 - wave, y: baseProjectile.y + 30 }); break;
-                    case '👵': { const activePlayer = player2Ref.current || player1Ref.current; const projectile: BossProjectile = { ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2 }; const pCenterX_g = activePlayer.x + PLAYER_WIDTH / 2, pCenterY_g = activePlayer.y + PLAYER_HEIGHT / 2; const bCenterX_g = currentBoss.x + BOSS_WIDTH / 2, bCenterY_g = currentBoss.y + BOSS_HEIGHT / 2; const dirX_g = pCenterX_g - bCenterX_g, dirY_g = pCenterY_g - bCenterY_g; const len_g = Math.sqrt(dirX_g * dirX_g + dirY_g * dirY_g); if (len_g > 0) { projectile.dx = (dirX_g / len_g) * BOSS_PROJECTILE_SPEED; projectile.dy = (dirY_g / len_g) * BOSS_PROJECTILE_SPEED; } projectilesToCreate.push(projectile); break; }
+                    case '👵': { 
+                        if (targetPlayer) {
+                            const projectile: BossProjectile = { ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2 };
+                            const pCenterX_g = targetPlayer.x + PLAYER_WIDTH / 2, pCenterY_g = targetPlayer.y + PLAYER_HEIGHT / 2;
+                            const bCenterX_g = currentBoss.x + BOSS_WIDTH / 2, bCenterY_g = currentBoss.y + BOSS_HEIGHT / 2;
+                            const dirX_g = pCenterX_g - bCenterX_g, dirY_g = pCenterY_g - bCenterY_g;
+                            const len_g = Math.sqrt(dirX_g * dirX_g + dirY_g * dirY_g);
+                            if (len_g > 0) {
+                                projectile.dx = (dirX_g / len_g) * BOSS_PROJECTILE_SPEED;
+                                projectile.dy = (dirY_g / len_g) * BOSS_PROJECTILE_SPEED;
+                            }
+                            projectilesToCreate.push(projectile);
+                        }
+                        break; 
+                    }
                     case '🦍': for (let i = -1; i <= 1; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, dx: i * (BOSS_PROJECTILE_SPEED * 0.4), dy: BOSS_PROJECTILE_SPEED * (1 - Math.abs(i) * 0.2), }); break;
                     case '🦖': projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2, dy: BOSS_PROJECTILE_SPEED * 1.8 }); break;
                     case '🐉': snakeShotCounter.current++; const sweepAngle = Math.sin(snakeShotCounter.current * 0.1) * (Math.PI / 2.5); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.sin(sweepAngle) * BOSS_PROJECTILE_SPEED, dy: Math.cos(sweepAngle) * BOSS_PROJECTILE_SPEED, }); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-2`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.sin(sweepAngle + Math.PI) * BOSS_PROJECTILE_SPEED, dy: Math.cos(sweepAngle + Math.PI) * BOSS_PROJECTILE_SPEED, }); break;
@@ -884,7 +973,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             };
             
             switch (currentBoss.type) {
-                // --- NEW BOSS ATTACKS ---
                 case '🏺': currentBoss.x = Math.random() * (GAME_WIDTH - BOSS_WIDTH); for (let i = 0; i < 12; i++) { const angle = (i / 12) * 2 * Math.PI + (snakeShotCounter.current * 0.1); projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.cos(angle) * BOSS_PROJECTILE_SPEED, dy: Math.sin(angle) * BOSS_PROJECTILE_SPEED, }); } snakeShotCounter.current++; break;
                 case '🪐': for (let i = 0; i < 16; i++) { const angle = (i / 16) * 2 * Math.PI; projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, y: currentBoss.y + BOSS_HEIGHT / 2, dx: Math.cos(angle) * BOSS_PROJECTILE_SPEED * 0.8, dy: Math.sin(angle) * BOSS_PROJECTILE_SPEED * 0.8, lifetime: 2000 }); } projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-center`, x: currentBoss.x + BOSS_WIDTH / 2, dy: BOSS_PROJECTILE_SPEED * 1.5, width: 40, height: 40 }); break;
                 case '🦾': for (let i = -3; i <= 3; i++) projectilesToCreate.push({ ...baseProjectile, id: `bproj-${now}-${i}`, x: currentBoss.x + BOSS_WIDTH / 2, dx: i * BOSS_PROJECTILE_SPEED * 0.2, dy: BOSS_PROJECTILE_SPEED * 1.3 }); currentBoss.y += 30; setTimeout(() => setBoss(b => b ? {...b, y: b.y - 30 } : null), 200); break;
@@ -903,24 +991,23 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             bossProjectilesRef.current.push(...projectilesToCreate);
         }
 
-        // Handle boss sub-entities
         if (currentBoss.subEntities && currentBoss.subEntities.length > 0) {
             switch(currentBoss.type) {
                 case '🐺':
                     currentBoss.subEntities[0].x = currentBoss.x - 50; currentBoss.subEntities[0].y = currentBoss.y;
                     currentBoss.subEntities[1].x = currentBoss.x + BOSS_WIDTH + 20; currentBoss.subEntities[1].y = currentBoss.y;
                     break;
-                case '⚫️': // Fragments hit by player, move to black hole
+                case '⚫️':
                     currentBoss.subEntities = currentBoss.subEntities.filter(frag => {
-                       if (frag.health <= 0) { // It has been shot
+                       if (frag.health <= 0) {
                           const dx = (currentBoss.x + BOSS_WIDTH/2) - frag.x;
                           const dy = (currentBoss.y + BOSS_HEIGHT/2) - frag.y;
                           const len = Math.sqrt(dx*dx + dy*dy);
                           frag.x += (dx/len) * 15; frag.y += (dy/len) * 15;
-                          if (len < 50) { // Reached the center
-                              currentBoss.health -= 50; // Damage boss
+                          if (len < 50) {
+                              currentBoss.health -= 50;
                               explosionsRef.current.push({ id: `exp-frag-${frag.id}`, x: frag.x, y: frag.y, startTime: now, emoji: '✨' });
-                              return false; // Remove fragment
+                              return false;
                           }
                        }
                        return true;
@@ -929,7 +1016,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             }
         }
         
-        // Handle Angel healing
         if (currentBoss.type === '👼') {
             if (now - (currentBoss.lastDamagedTime || 0) > 3000) {
                 currentBoss.health = Math.min(currentBoss.maxHealth, currentBoss.health + 0.5);
@@ -937,7 +1023,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         }
     }
     
-    // --- Collision Detection ---
     if (!isInvincibleRef.current) {
         let damageToP1 = 0;
         let damageToP2 = 0;
@@ -1034,6 +1119,9 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
             if (isMultiplayer && player2Ref.current && !isPlayer2Dead && checkCollision(player2Ref.current, currentBoss)) damageToP2 += HIT_DAMAGE * 2 * damageMultiplier;
         }
 
+        if (damageToP1 > 0 || damageToP2 > 0) {
+            audioManager.playSfx('hit');
+        }
         if (damageToP1 > 0) setPlayer1Hp(hp => Math.max(0, hp - damageToP1));
         if (damageToP2 > 0) setPlayer2Hp(hp => Math.max(0, hp - damageToP2));
         if (enemiesToRemove.size > 0) enemiesRef.current = enemiesRef.current.filter(e => !enemiesToRemove.has(e.id));
@@ -1060,7 +1148,10 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
                  setCurrentRunCurrency(c => c + drop.amount);
                  collected = true;
             }
-            if (collected) currencyDropsToRemove.add(drop.id);
+            if (collected) {
+              currencyDropsToRemove.add(drop.id);
+              audioManager.playSfx('coin');
+            }
         }
         if (currencyDropsToRemove.size > 0) currencyDropsRef.current = currencyDropsRef.current.filter(d => !currencyDropsToRemove.has(d.id));
     }
@@ -1147,6 +1238,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     if (bulletsHit.size > 0) bulletsRef.current = bulletsRef.current.filter(b => !bulletsHit.has(b.id));
     if (droneBulletsHit.size > 0) droneBulletsRef.current = droneBulletsRef.current.filter(b => !droneBulletsHit.has(b.id));
     if (enemiesHit.size > 0) {
+        audioManager.playSfx('explosion');
         enemiesHit.forEach(id => {
             const enemy = enemiesRef.current.find(e => e.id === id);
             if(enemy) explosionsRef.current.push({ id: `exp-en-${id}`, x: enemy.x, y: enemy.y, startTime: now, emoji: '💥' });
@@ -1159,6 +1251,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     if (xpToAdd > 0) setCurrentRunXp(xp => xp + xpToAdd);
     
     if (currentBoss && currentBoss.health <= 0) {
+        audioManager.playSfx('explosion');
         const currencyMultiplier = isGoldRush ? 2 : 1;
         const bossCurrencyDrop = (BOSS_CURRENCY_DROP * level) * currencyMultiplier * (equippedBoatId === 'p5' ? AEGIS_CURRENCY_BONUS : 1);
         currencyDropsRef.current.push({
@@ -1177,7 +1270,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
         explosionsRef.current.push({ id: `exp-boss-${currentBoss.id}`, x: currentBoss.x, y: currentBoss.y, startTime: now, emoji: '💥' });
         
         if (level === LEVEL_CONFIGS.length) {
-            // Need to collect final drops before ending
             pickupDrops();
             onGameWon({ p1: finalP1Score, p2: finalP2Score }, finalXp, powerUpCount, currentRunCurrency + bossCurrencyDrop);
             return;
@@ -1218,7 +1310,6 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     };
   }, [isPaused, gameLoop, resetAllPlayerDebuffs]);
 
-  // Effect for scaling the game canvas
   useEffect(() => {
     const updateScale = () => {
         if (gameContainerRef.current) {
@@ -1234,17 +1325,14 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
   
   const handleTouchAction = useCallback((action: string, active: boolean) => {
     if (active) {
-        // Handle single-press actions on touch start
         if (action === 'q') {
             if (equippedGun) setP1Weapon(w => w === 'bomb' ? 'gun' : 'bomb');
         } else if (action === 'e') {
             handleUsePowerUp();
         } else {
-            // For movement and firing, add to the keysPressed set
             keysPressed.current.add(action);
         }
     } else {
-        // On touch end, remove from the set
         keysPressed.current.delete(action);
     }
   }, [equippedGun, handleUsePowerUp]);
@@ -1266,7 +1354,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
 
                 if (key === expectedKey) {
                     const newIndex = qteDodgeState.currentIndex + 1;
-                    if (newIndex >= qteDodgeState.sequence.length) { // SUCCESS
+                    if (newIndex >= qteDodgeState.sequence.length) {
                         const player = qteDodgeState.playerId === 1 ? player1Ref.current : player2Ref.current!;
                         const threat = qteDodgeState.entityType === 'projectile'
                             ? bossProjectilesRef.current.find(p => p.id === qteDodgeState.triggeringEntityId)
@@ -1304,7 +1392,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
                     } else {
                         setQteDodgeState(prev => prev ? { ...prev, currentIndex: newIndex } : null);
                     }
-                } else { // FAILURE
+                } else {
                     const damageReduction = equippedBoat.damageReduction || 0;
                     const damageMultiplier = 1 - damageReduction;
                     const finalDamage = HIT_DAMAGE * damageMultiplier;
@@ -1353,7 +1441,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
     }
   }, [boss, bossInsult, isLoadingInsult]);
 
-  if (!levelConfig) return null; // Should not happen
+  if (!levelConfig) return null;
   const rapidFireTimeLeft = isRapidFire ? Math.max(0, rapidFireEndTime - Date.now()) : 0;
   const timeSlowTimeLeft = isTimeSlow ? Math.max(0, timeSlowEndTime - Date.now()) : 0;
   const goldRushTimeLeft = isGoldRush ? Math.max(0, goldRushEndTime - Date.now()) : 0;
@@ -1396,7 +1484,7 @@ const Game: React.FC<GameProps> = ({ startLevel, isMultiplayer, onGameOver, onGa
               )}
             </div>
         </div>
-        <MobileControls onAction={handleTouchAction} />
+        <MobileControls show={settings.showMobileControls} onAction={handleTouchAction} />
     </div>
   );
 };

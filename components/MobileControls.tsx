@@ -1,10 +1,12 @@
+
 import React from 'react';
 
 interface MobileControlsProps {
+  show: boolean;
   onAction: (action: string, active: boolean) => void;
 }
 
-const MobileControls: React.FC<MobileControlsProps> = ({ onAction }) => {
+const MobileControls: React.FC<MobileControlsProps> = ({ show, onAction }) => {
   const handleTouch = (action: string, active: boolean) => (e: React.TouchEvent) => {
     e.preventDefault();
     onAction(action, active);
@@ -22,6 +24,10 @@ const MobileControls: React.FC<MobileControlsProps> = ({ onAction }) => {
       {children}
     </div>
   );
+
+  if (!show) {
+    return null;
+  }
 
   return (
     <div className="md:hidden fixed inset-0 z-20 pointer-events-none text-white">

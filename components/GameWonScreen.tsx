@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { audioManager } from '../utils/audioManager';
 
 interface GameWonScreenProps {
   score: number;
@@ -53,7 +54,7 @@ const GameWonScreen: React.FC<GameWonScreenProps> = ({ score, score2, onRestart,
           onClick={onRestart}
           className="px-6 py-3 bg-yellow-500 text-gray-900 font-bold text-lg rounded-lg transform transition-transform duration-200 hover:scale-110 hover:bg-yellow-400 focus:outline-none focus:ring-4 focus:ring-yellow-300"
         >
-          Play Again
+          Level Select
         </button>
         <button
           onClick={onMenu}

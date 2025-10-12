@@ -8,10 +8,13 @@ import ShopScreen from './components/ShopScreen';
 import SupplyDropScreen from './components/SupplyDropScreen';
 import LevelSelectionScreen from './components/LevelSelectionScreen';
 import PauseMenu from './components/PauseMenu';
-import { GameState, Boat, BombType, GunType, PowerUp } from './types';
-import { BOATS, BOMBS, GUNS, POWER_UPS, LOOT_POOL, SUPPLY_DROP_COST, DUPLICATE_CURRENCY_AWARD, getXpForNextLevel } from './constants';
+import SettingsMenu from './components/SettingsMenu';
+import { GameState, Boat, BombType, GunType, PowerUp, Settings } from './types';
+import { BOATS, BOMBS, GUNS, POWER_UPS, LOOT_POOL, SUPPLY_DROP_COST, DUPLICATE_CURRENCY_AWARD, getXpForNextLevel, LEVEL_CONFIGS } from './constants';
+import { audioManager } from './utils/audioManager';
 
 const SAVE_KEY = 'underwaterWarSaveData';
+const SETTINGS_KEY = 'underwaterWarSettings';
 
 interface PlayerData {
   playerLevel: number;
@@ -41,12 +44,18 @@ const defaultPlayerData: PlayerData = {
   equippedPowerUpId: 'pw1',
 };
 
+const defaultSettings: Settings = {
+    masterVolume: 0.7,
+    musicVolume: 0.8,
+    sfxVolume: 0.9,
+    showMobileControls: true,
+};
+
 const loadGameData = (): PlayerData => {
   try {
     const savedData = localStorage.getItem(SAVE_KEY);
     if (savedData) {
       const parsed = JSON.parse(savedData);
-      // Convert arrays from JSON back to Sets
       return {
         ...defaultPlayerData,
         ...parsed,
@@ -61,24 +70,52 @@ const loadGameData = (): PlayerData => {
   return defaultPlayerData;
 };
 
+const loadSettings = (): Settings => {
+    try {
+        const savedSettings = localStorage.getItem(SETTINGS_KEY);
+        if (savedSettings) {
+            return { ...defaultSettings, ...JSON.parse(savedSettings) };
+        }
+    } catch (error) {
+        console.error("Failed to load settings:", error);
+    }
+    return defaultSettings;
+}
+
 
 const App: React.FC = () => {
   const [gameState, setGameState] = useState<GameState>(GameState.MainMenu);
   const [finalScore1, setFinalScore1] = useState(0);
   const [finalScore2, setFinalScore2] = useState<number | undefined>(undefined);
   const [startLevel, setStartLevel] = useState(1);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
-  // Player Progression & Inventory (now combined and persisted)
   const [playerData, setPlayerData] = useState<PlayerData>(loadGameData);
+  const [settings, setSettings] = useState<Settings>(loadSettings);
   const [lastRunXpEarned, setLastRunXpEarned] = useState(0);
   const [levelUpInfo, setLevelUpInfo] = useState<{ old: number; new: number } | null>(null);
 
-  // Auto-save whenever playerData changes
+  useEffect(() => {
+    audioManager.init(settings);
+  }, []); // Init once on mount
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      audioManager.updateVolumes(settings);
+    } catch (error) {
+      console.error("Failed to save settings:", error);
+    }
+  }, [settings]);
+
+  const handleSettingsChange = useCallback((newSettings: Partial<Settings>) => {
+    setSettings(prev => ({ ...prev, ...newSettings }));
+  }, []);
+
   useEffect(() => {
     try {
       const dataToSave = {
         ...playerData,
-        // Convert Sets to arrays for JSON serialization
         ownedBoats: Array.from(playerData.ownedBoats),
         ownedBombs: Array.from(playerData.ownedBombs),
         ownedGuns: Array.from(playerData.ownedGuns),
@@ -139,10 +176,10 @@ const App: React.FC = () => {
     });
     
     setGameState(won ? GameState.GameWon : GameState.GameOver);
-  }, []);
+  }, [startLevel]);
 
   const backToMenu = useCallback(() => {
-    setFinalScore2(undefined); // Clear multiplayer score on return to menu
+    setFinalScore2(undefined);
     setLevelUpInfo(null);
     setGameState(GameState.MainMenu);
   }, []);
@@ -293,6 +330,7 @@ const App: React.FC = () => {
               playerLevel={playerData.playerLevel}
               playerXp={playerData.playerXp}
               xpForNextLevel={xpForNextLevel}
+              settings={settings}
             />
             {isPaused && <PauseMenu onResume={resumeGame} onMenu={backToMenu} />}
           </>
@@ -301,7 +339,7 @@ const App: React.FC = () => {
         return <GameOverScreen 
                     score={finalScore1} 
                     score2={finalScore2}
-                    onRestart={finalScore2 !== undefined ? startMultiplayerGame : () => startGame(1)} 
+                    onRestart={finalScore2 !== undefined ? startMultiplayerGame : () => startGame(startLevel)} 
                     onMenu={backToMenu} 
                     xpEarned={lastRunXpEarned}
                     levelUpInfo={levelUpInfo}
@@ -310,13 +348,16 @@ const App: React.FC = () => {
         return <GameWonScreen 
                     score={finalScore1} 
                     score2={finalScore2}
-                    onRestart={finalScore2 !== undefined ? startMultiplayerGame : () => startGame(1)} 
+                    onRestart={finalScore2 !== undefined ? startMultiplayerGame : goToLevelSelection} 
                     onMenu={backToMenu} 
                     xpEarned={lastRunXpEarned}
                     levelUpInfo={levelUpInfo}
                 />;
       case GameState.LevelSelection:
-        return <LevelSelectionScreen onSelectLevel={startGame} onBack={backToMenu} />;
+        return <LevelSelectionScreen 
+                    onSelectLevel={startGame} 
+                    onBack={backToMenu} 
+                />;
       case GameState.Shop:
         return (
           <ShopScreen 
@@ -352,6 +393,7 @@ const App: React.FC = () => {
                     onStartMultiplayer={startMultiplayerGame} 
                     onGoToShop={goToShop} 
                     onGoToSupplyDrop={goToSupplyDrop} 
+                    onGoToSettings={() => setIsSettingsOpen(true)}
                     currency={playerData.currency} 
                     playerLevel={playerData.playerLevel}
                     playerXp={playerData.playerXp}
@@ -368,6 +410,13 @@ const App: React.FC = () => {
       </h1>
       <p className="text-gray-200 mb-6 text-center text-sm sm:text-base">Engage in naval combat against quirky underwater enemies!</p>
       {renderContent()}
+      {isSettingsOpen && (
+        <SettingsMenu 
+            settings={settings}
+            onSettingsChange={handleSettingsChange}
+            onClose={() => setIsSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 };

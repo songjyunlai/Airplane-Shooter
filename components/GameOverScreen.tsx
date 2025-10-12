@@ -1,5 +1,6 @@
 
 import React from 'react';
+import { audioManager } from '../utils/audioManager';
 
 interface GameOverScreenProps {
   score: number;

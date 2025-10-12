@@ -1,3 +1,4 @@
+
 import { LevelConfig, Boat, BombType, Rarity, GunType, PowerUp } from './types';
 
 export const GAME_WIDTH = 800;
@@ -117,7 +118,7 @@ export const BOATS: Boat[] = [
     { id: 'p2', name: 'Stealth Ship', emoji: '🛥️', cost: 500, rarity: 'Rare', description: 'Equipped with a passive shield that reduces all incoming damage by 20%.', hpMultiplier: 1.2, damageReduction: 0.2 },
     { id: 'p3', name: 'Battleship', emoji: '🚢', cost: 1500, rarity: 'Epic', description: 'Fires additional projectiles from its side cannons.', hpMultiplier: 1.5 },
     { id: 'p4', name: 'Ghost Ship', emoji: '⛵️', rarity: 'Legendary', findInSupplyDropOnly: true, description: 'A mysterious and powerful specter.', hpMultiplier: 2.0 },
-    { id: 'p5', name: 'AI Ship', emoji: '🛰️', cost: 0, rarity: 'Legendary', description: 'Evade attacks with a timed key sequence to trigger a counter-pulse.', hpMultiplier: 3.0 },
+    { id: 'p5', name: 'AI Ship', emoji: '🛰️', cost: 20000, rarity: 'Legendary', description: 'Evade attacks with a timed key sequence to trigger a counter-pulse.', hpMultiplier: 3.0 },
 ];
 
 export const BOMBS: BombType[] = [
